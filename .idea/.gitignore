@@ -1,0 +1,54 @@
+# =========================
+# BAZA DANYCH (SQLite)
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+/backend/database/*.db
+
+# =========================
+# SEKRETY I KONFIGURACJA
+# =========================
+.env
+.env.local
+*.pem
+*.key
+
+# =========================
+# BACKEND (GoLang)
+# =========================
+*.exe
+__debug_bin
+/backend/bin/
+/backend/build/
+
+# =========================
+# FRONTEND MOBILNY (Android/Kotlin)
+# =========================
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# =========================
+# ŚRODOWISKA IDE (JetBrains / GoLand)
+# =========================
+.idea/
+*.iml
+*.iws
+*.ipr
+vcs.xml
+modules.xml
+go.imports.xml
+
+# =========================
+# SYSTEMY OPERACYJNE
+# =========================
+.DS_Store
+Thumbs.db
