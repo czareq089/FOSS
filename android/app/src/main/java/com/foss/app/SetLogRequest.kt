@@ -8,4 +8,6 @@ data class SetLogRequest(
     @SerializedName("reps") val reps: Int,
     @SerializedName("weight_kg") val weightKg: Double,
     @SerializedName("rir") val rir: Int
+
 )
+

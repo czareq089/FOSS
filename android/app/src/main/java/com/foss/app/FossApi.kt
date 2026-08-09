@@ -1,10 +1,48 @@
 package com.foss.app
 
+import com.foss.app.models.ReorderRequest
+import com.foss.app.models.Routine
+import com.foss.app.models.RoutineExercisePreview
+import com.foss.app.models.StartWorkoutRequest
+import com.foss.app.models.StartWorkoutResponse
+import com.foss.app.models.VolumeResponse
+import com.foss.app.models.WorkoutSummary
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.DELETE
+import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.Query
 
 interface FossApi {
+    @GET("/api/routines")
+    suspend fun getRoutines(@Query("user_id") userId: Int = 1): Response<List<Routine>>
+
+    @GET("/api/routines/exercises")
+    suspend fun getRoutineExercises(
+        @Query("routine_id") routineId: Int,
+        @Query("user_id") userId: Int = 1
+    ): Response<List<RoutineExercisePreview>>
+
+    @PATCH("/api/routines/exercises/reorder")
+    suspend fun reorderExercises(@Body request: ReorderRequest): Response<Unit>
+
+    @POST("/api/workouts/start")
+    suspend fun startWorkout(@Body request: StartWorkoutRequest): Response<StartWorkoutResponse>
+
     @POST("/api/workouts/log")
     suspend fun logSet(@Body request: SetLogRequest): Response<Unit>
+
+    @GET("/api/workouts")
+    suspend fun getWorkoutHistory(@Query("user_id") userId: Int = 1): Response<List<WorkoutSummary>>
+
+    @DELETE("/api/workouts")
+    suspend fun deleteWorkout(@Query("id") workoutId: Int): Response<Unit>
+
+    @GET("/api/mobile/dashboard/volume")
+    suspend fun getDashboardVolume(
+        @Query("range") range: String,
+        @Query("user_id") userId: Int = 1
+    ): Response<VolumeResponse>
 }
