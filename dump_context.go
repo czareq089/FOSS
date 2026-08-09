@@ -1,12 +1,43 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
+
+const dbPath = "backend/database/foss.db"
+
+func dumpSchema(file *os.File) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		fmt.Println("Nie udało się otworzyć bazy:", err)
+		return
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT sql FROM sqlite_master WHERE type = 'table' AND sql IS NOT NULL ORDER BY name`)
+	if err != nil {
+		fmt.Println("Nie udało się odczytać schematu:", err)
+		return
+	}
+	defer rows.Close()
+
+	file.WriteString("### Database Schema\n```sql\n")
+	for rows.Next() {
+		var stmt string
+		if err := rows.Scan(&stmt); err != nil {
+			continue
+		}
+		file.WriteString(stmt + ";\n\n")
+	}
+	file.WriteString("```\n\n")
+}
 
 func main() {
 	outDir := ".llm_context"
@@ -26,6 +57,7 @@ func main() {
 
 	file.WriteString("# F.O.S.S. - Kontekst Projektu\n\n")
 
+	dumpSchema(file)
 	// Czarna lista folderów
 	ignoreDirs := map[string]bool{
 		".git": true, ".idea": true, ".llm_context": true,
