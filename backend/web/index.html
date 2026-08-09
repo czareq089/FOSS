@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>F.O.S.S.</title>
+    <!-- PicoCSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        :root {
+            --accent-color: #a3a3a3;
+            --pico-primary: var(--accent-color);
+            --pico-background-color: #0a0a0a;
+            --pico-color: #d4d4d4;
+            --pico-h1-color: #ffffff;
+            --pico-h2-color: #ffffff;
+            --pico-h3-color: #ffffff;
+            --pico-card-background-color: #171717;
+            --pico-border-color: #262626;
+        }
+
+        body { padding-top: 2rem; }
+
+        .widget-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-top: 1.5rem; }
+        .widget { background: var(--pico-card-background-color); border: 1px solid var(--pico-border-color); border-radius: 8px; padding: 1.5rem; }
+        .widget h3 { margin-bottom: 1rem; font-size: 1.2rem; font-weight: normal; color: var(--pico-color); text-align: center; }
+        .widget .value { font-size: 2.5rem; font-weight: bold; color: var(--accent-color); margin-bottom: 0.5rem; text-align: center; }
+
+        progress { --pico-primary-background: var(--accent-color); margin-bottom: 0.5rem; }
+        .macro-label { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.2rem; }
+
+        .htmx-indicator { display: none; }
+        .htmx-request .htmx-indicator { display: inline-block; margin-left: 1rem; }
+
+        nav li strong { color: var(--accent-color); }
+    </style>
+</head>
+<body>
+<main class="container">
+    <nav>
+        <ul>
+            <li><strong>F.O.S.S.</strong></li>
+        </ul>
+        <ul>
+            <li><a href="/" class="secondary" style="color: var(--accent-color);">Dashboard</a></li>
+            <li><a href="/routines" class="secondary">Routines</a></li>
+            <li><a href="/diet" class="secondary">Diet</a></li>
+        </ul>
+    </nav>
+
+    <section style="margin-top: 2rem;">
+        <h2>Overview</h2>
+        <p>Real-time data fetched from SQLite database.</p>
+
+        <div hx-get="/api/dashboard/widgets" hx-trigger="load" hx-target="#stats-grid">
+            <span class="htmx-indicator" aria-busy="true">Loading metrics...</span>
+        </div>
+
+        <div id="stats-grid" class="widget-grid">
+            <!-- HTMX injects widgets here -->
+        </div>
+    </section>
+</main>
+</body>
+</html>
