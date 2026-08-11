@@ -50,3 +50,4 @@ __debug_bin
 # =========================
 .DS_Store
 Thumbs.db
+/backend/download_database.go
