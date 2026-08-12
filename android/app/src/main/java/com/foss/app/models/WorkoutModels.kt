@@ -11,7 +11,9 @@ data class ExerciseInfo(
     @SerializedName("workout_exercise_id") val workoutExerciseId: Int,
     @SerializedName("exercise_id") val exerciseId: Int,
     @SerializedName("name") val name: String,
-    @SerializedName("position") val position: Int
+    @SerializedName("position") val position: Int,
+    @SerializedName("template_sets") val templateSets: List<RoutineSet>?,
+    @SerializedName("last_sets") val lastSets: List<LastSetValue>?
 )
 
 data class StartWorkoutRequest(
@@ -21,16 +23,31 @@ data class StartWorkoutRequest(
 
 data class StartWorkoutResponse(
     @SerializedName("workout_id") val workoutId: Int,
+    @SerializedName("routine_id") val routineId: Int, // FIX: Pozwala apce wiedzieć, z kim się synchronizować
     @SerializedName("exercises") val exercises: List<ExerciseInfo>
 )
 
 data class RoutineExercisePreview(
+    @SerializedName("routine_exercise_id") val routineExerciseId: Int,
     @SerializedName("exercise_id") val exerciseId: Int,
     @SerializedName("name") val name: String,
     @SerializedName("position") val position: Int,
-    @SerializedName("default_sets") val defaultSets: Int,
+    @SerializedName("template_sets") val templateSets: List<RoutineSet>?,
     @SerializedName("last_sets") val lastSets: List<LastSetValue>?
-)
+) {
+    @Transient
+    private var _mutableTemplateSets: androidx.compose.runtime.snapshots.SnapshotStateList<RoutineSet>? = null
+
+    val mutableTemplateSets: androidx.compose.runtime.snapshots.SnapshotStateList<RoutineSet>
+        get() {
+            if (_mutableTemplateSets == null) {
+                _mutableTemplateSets = androidx.compose.runtime.mutableStateListOf<RoutineSet>().apply {
+                    if (templateSets != null) addAll(templateSets) else add(RoutineSet(1, "standard"))
+                }
+            }
+            return _mutableTemplateSets!!
+        }
+}
 
 data class VolumeResponse(
     @SerializedName("volume_kg") val volumeKg: Double
@@ -57,6 +74,16 @@ data class ReorderPosition(
 data class ReorderRequest(
     @SerializedName("routine_id") val routineId: Int,
     @SerializedName("positions") val positions: List<ReorderPosition>
+)
+
+data class WorkoutReorderRequest(
+    @SerializedName("workout_id") val workoutId: Int,
+    @SerializedName("positions") val positions: List<ReorderPosition>
+)
+
+data class SyncRoutineReq(
+    @SerializedName("routine_id") val routineId: Int,
+    @SerializedName("workout_id") val workoutId: Int
 )
 
 data class ExerciseItem(
@@ -102,4 +129,14 @@ data class WorkoutDetailResponse(
     @SerializedName("routine_name") val routineName: String,
     @SerializedName("date") val date: String,
     @SerializedName("exercises") val exercises: List<WorkoutDetailExercise>
+)
+
+data class RoutineSet(
+    @SerializedName("set_number") val setNumber: Int,
+    @SerializedName("set_type") val setType: String
+)
+
+data class UpdateRoutineSetsReq(
+    @SerializedName("routine_exercise_id") val routineExerciseId: Int,
+    @SerializedName("sets") val sets: List<RoutineSet>
 )

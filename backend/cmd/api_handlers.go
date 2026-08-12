@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
 	_ "modernc.org/sqlite"
@@ -20,6 +19,7 @@ type SetLogRequest struct {
 	Reps              int     `json:"reps"`
 	WeightKg          float64 `json:"weight_kg"`
 	RIR               int     `json:"rir"`
+	SetType           string  `json:"set_type"`
 }
 
 type Routine struct {
@@ -28,10 +28,12 @@ type Routine struct {
 }
 
 type ExerciseInfo struct {
-	WorkoutExerciseID int    `json:"workout_exercise_id"`
-	ExerciseID        int    `json:"exercise_id"`
-	Name              string `json:"name"`
-	Position          int    `json:"position"`
+	WorkoutExerciseID int            `json:"workout_exercise_id"`
+	ExerciseID        int            `json:"exercise_id"`
+	Name              string         `json:"name"`
+	Position          int            `json:"position"`
+	TemplateSets      []RoutineSet   `json:"template_sets"`
+	LastSets          []LastSetValue `json:"last_sets"`
 }
 
 type StartWorkoutRequest struct {
@@ -41,6 +43,7 @@ type StartWorkoutRequest struct {
 
 type StartWorkoutResponse struct {
 	WorkoutID int            `json:"workout_id"`
+	RoutineID int            `json:"routine_id"` // FIX: Zwracamy RoutineID dla późniejszej synchronizacji
 	Exercises []ExerciseInfo `json:"exercises"`
 }
 
@@ -58,11 +61,12 @@ type LastSetValue struct {
 }
 
 type RoutineExercisePreview struct {
-	ExerciseID  int            `json:"exercise_id"`
-	Name        string         `json:"name"`
-	Position    int            `json:"position"`
-	DefaultSets int            `json:"default_sets"`
-	LastSets    []LastSetValue `json:"last_sets"`
+	RoutineExerciseID int            `json:"routine_exercise_id"`
+	ExerciseID        int            `json:"exercise_id"`
+	Name              string         `json:"name"`
+	Position          int            `json:"position"`
+	TemplateSets      []RoutineSet   `json:"template_sets"`
+	LastSets          []LastSetValue `json:"last_sets"`
 }
 
 type ReorderPosition struct {
@@ -73,6 +77,18 @@ type ReorderPosition struct {
 type ReorderRequest struct {
 	RoutineID int               `json:"routine_id"`
 	Positions []ReorderPosition `json:"positions"`
+}
+
+// NOWE: Żądanie zmiany kolejności w aktywnym treningu
+type WorkoutReorderRequest struct {
+	WorkoutID int               `json:"workout_id"`
+	Positions []ReorderPosition `json:"positions"`
+}
+
+// NOWE: Żądanie synchronizacji rutyny na podstawie zakończonego treningu
+type SyncRoutineReq struct {
+	RoutineID int `json:"routine_id"`
+	WorkoutID int `json:"workout_id"`
 }
 
 type VolumeResponse struct {
@@ -122,6 +138,16 @@ type WorkoutDetailResponse struct {
 	RoutineName string                  `json:"routine_name"`
 	Date        string                  `json:"date"`
 	Exercises   []WorkoutDetailExercise `json:"exercises"`
+}
+
+type RoutineSet struct {
+	SetNumber int    `json:"set_number"`
+	SetType   string `json:"set_type"`
+}
+
+type UpdateRoutineSetsReq struct {
+	RoutineExerciseID int          `json:"routine_exercise_id"`
+	Sets              []RoutineSet `json:"sets"`
 }
 
 // ==========================================
@@ -220,18 +246,33 @@ func handleAPILogSet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	query := `INSERT INTO training_workout_sets (workout_exercise_id, set_number, reps, weight_kg, rir) 
-			  VALUES (?, ?, ?, ?, ?)`
+	var exists bool
+	err = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM training_workout_sets WHERE workout_exercise_id = ? AND set_number = ?)`,
+		req.WorkoutExerciseID, req.SetNumber).Scan(&exists)
 
-	_, err = db.Exec(query, req.WorkoutExerciseID, req.SetNumber, req.Reps, req.WeightKg, req.RIR)
 	if err != nil {
-		http.Error(w, "Failed to insert set into database", http.StatusInternalServerError)
+		http.Error(w, "Database query error", http.StatusInternalServerError)
+		return
+	}
+
+	if exists {
+		_, err = db.Exec(`UPDATE training_workout_sets SET reps = ?, weight_kg = ?, rir = ?, set_type = ? 
+						  WHERE workout_exercise_id = ? AND set_number = ?`,
+			req.Reps, req.WeightKg, req.RIR, req.SetType, req.WorkoutExerciseID, req.SetNumber)
+	} else {
+		_, err = db.Exec(`INSERT INTO training_workout_sets (workout_exercise_id, set_number, reps, weight_kg, rir, set_type) 
+						  VALUES (?, ?, ?, ?, ?, ?)`,
+			req.WorkoutExerciseID, req.SetNumber, req.Reps, req.WeightKg, req.RIR, req.SetType)
+	}
+
+	if err != nil {
+		http.Error(w, "Failed to save set into database", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `{"status": "success", "message": "Set logged successfully"}`)
+	fmt.Fprint(w, `{"status": "success", "message": "Set logged/updated successfully"}`)
 }
 
 func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
@@ -258,7 +299,7 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.Query(`
-		SELECT re.exercise_id, e.name, re.position, re.default_sets
+		SELECT re.id, re.exercise_id, e.name, re.position
 		FROM training_routine_exercises re
 		JOIN training_exercises e ON e.id = re.exercise_id
 		WHERE re.routine_id = ?
@@ -271,9 +312,19 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 	exercises := []RoutineExercisePreview{}
 	for rows.Next() {
 		var ex RoutineExercisePreview
-		if err := rows.Scan(&ex.ExerciseID, &ex.Name, &ex.Position, &ex.DefaultSets); err != nil {
+		if err := rows.Scan(&ex.RoutineExerciseID, &ex.ExerciseID, &ex.Name, &ex.Position); err != nil {
 			continue
 		}
+
+		tRows, _ := db.Query(`SELECT set_number, set_type FROM training_routine_sets WHERE routine_exercise_id = ? ORDER BY set_number`, ex.RoutineExerciseID)
+		ex.TemplateSets = []RoutineSet{}
+		for tRows.Next() {
+			var ts RoutineSet
+			tRows.Scan(&ts.SetNumber, &ts.SetType)
+			ex.TemplateSets = append(ex.TemplateSets, ts)
+		}
+		tRows.Close()
+
 		ex.LastSets = []LastSetValue{}
 		exercises = append(exercises, ex)
 	}
@@ -282,34 +333,25 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 	for i := range exercises {
 		var lastWorkoutExerciseID int
 		err := db.QueryRow(`
-			SELECT we.id
-			FROM training_workout_exercises we
+			SELECT we.id FROM training_workout_exercises we
 			JOIN training_workouts w ON w.id = we.workout_id
 			WHERE w.user_id = ? AND we.exercise_id = ?
-			ORDER BY w.date DESC
-			LIMIT 1`, userID, exercises[i].ExerciseID).Scan(&lastWorkoutExerciseID)
+			ORDER BY w.date DESC LIMIT 1`, userID, exercises[i].ExerciseID).Scan(&lastWorkoutExerciseID)
 		if err != nil {
 			continue
 		}
 
-		setRows, err := db.Query(`
-			SELECT set_number, weight_kg, reps, rir
-			FROM training_workout_sets
-			WHERE workout_exercise_id = ?
-			ORDER BY set_number`, lastWorkoutExerciseID)
-		if err != nil {
-			continue
-		}
-		lastSets := []LastSetValue{}
-		for setRows.Next() {
-			var s LastSetValue
-			if err := setRows.Scan(&s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir); err != nil {
-				continue
+		setRows, err := db.Query(`SELECT set_number, weight_kg, reps, rir FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, lastWorkoutExerciseID)
+		if err == nil {
+			lastSets := []LastSetValue{}
+			for setRows.Next() {
+				var s LastSetValue
+				setRows.Scan(&s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir)
+				lastSets = append(lastSets, s)
 			}
-			lastSets = append(lastSets, s)
+			setRows.Close()
+			exercises[i].LastSets = lastSets
 		}
-		setRows.Close()
-		exercises[i].LastSets = lastSets
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -498,6 +540,47 @@ func handleAPIReorderExercises(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func handleAPIWorkoutReorderExercises(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req WorkoutReorderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	for _, p := range req.Positions {
+		if _, err := tx.Exec(`
+			UPDATE training_workout_exercises
+			SET position = ?
+			WHERE workout_id = ? AND exercise_id = ?`, p.Position, req.WorkoutID, p.ExerciseID); err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to update positions", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit reorder", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
@@ -525,7 +608,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	workoutID, _ := res.LastInsertId()
 
 	rows, err := db.Query(`
-	SELECT re.exercise_id, e.name, re.position
+	SELECT re.id, re.exercise_id, e.name, re.position
 	FROM training_routine_exercises re
 	JOIN training_exercises e ON e.id = re.exercise_id
 	WHERE re.routine_id = ?
@@ -536,6 +619,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type routineExercise struct {
+		id         int
 		exerciseID int
 		name       string
 		position   int
@@ -543,7 +627,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	var routineExercises []routineExercise
 	for rows.Next() {
 		var re routineExercise
-		if err := rows.Scan(&re.exerciseID, &re.name, &re.position); err != nil {
+		if err := rows.Scan(&re.id, &re.exerciseID, &re.name, &re.position); err != nil {
 			continue
 		}
 		routineExercises = append(routineExercises, re)
@@ -554,21 +638,46 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	for _, re := range routineExercises {
 		weRes, err := db.Exec(`INSERT INTO training_workout_exercises (workout_id, exercise_id, position) VALUES (?, ?, ?)`, workoutID, re.exerciseID, re.position)
 		if err != nil {
-			log.Printf("Failed to insert workout_exercise (workout_id=%d, exercise_id=%d): %v", workoutID, re.exerciseID, err)
 			continue
 		}
 		weID, _ := weRes.LastInsertId()
+
+		tSets := []RoutineSet{}
+		tRows, _ := db.Query(`SELECT set_number, set_type FROM training_routine_sets WHERE routine_exercise_id = ? ORDER BY set_number`, re.id)
+		for tRows.Next() {
+			var ts RoutineSet
+			tRows.Scan(&ts.SetNumber, &ts.SetType)
+			tSets = append(tSets, ts)
+		}
+		tRows.Close()
+
+		lSets := []LastSetValue{}
+		var lastWeID int
+		err = db.QueryRow(`SELECT we.id FROM training_workout_exercises we JOIN training_workouts w ON w.id = we.workout_id WHERE w.user_id = ? AND we.exercise_id = ? AND w.id != ? ORDER BY w.date DESC LIMIT 1`, req.UserID, re.exerciseID, workoutID).Scan(&lastWeID)
+		if err == nil {
+			lsRows, _ := db.Query(`SELECT set_number, weight_kg, reps, rir FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, lastWeID)
+			for lsRows.Next() {
+				var ls LastSetValue
+				lsRows.Scan(&ls.SetNumber, &ls.WeightKg, &ls.Reps, &ls.Rir)
+				lSets = append(lSets, ls)
+			}
+			lsRows.Close()
+		}
+
 		exercises = append(exercises, ExerciseInfo{
 			WorkoutExerciseID: int(weID),
 			ExerciseID:        re.exerciseID,
 			Name:              re.name,
 			Position:          re.position,
+			TemplateSets:      tSets,
+			LastSets:          lSets,
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(StartWorkoutResponse{
 		WorkoutID: int(workoutID),
+		RoutineID: req.RoutineID,
 		Exercises: exercises,
 	})
 }
@@ -624,11 +733,9 @@ func handleAPIRoutineExerciseAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	// Pobieramy najwyższą pozycję w aktualnej rutynie
 	var maxPos int
 	_ = db.QueryRow(`SELECT COALESCE(MAX(position), 0) FROM training_routine_exercises WHERE routine_id = ?`, req.RoutineID).Scan(&maxPos)
 
-	// Dodajemy ćwiczenie na pozycję maxPos + 1 (na sam koniec) z domyślną liczbą 3 serii
 	_, err = db.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`,
 		req.RoutineID, req.ExerciseID, maxPos+1)
 
@@ -756,7 +863,6 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 
 	var resp WorkoutDetailResponse
 
-	// Pobranie nagłówka treningu
 	err = db.QueryRow(`
 		SELECT id, date, COALESCE((SELECT name FROM training_routines WHERE id = routine_id), 'Custom workout') 
 		FROM training_workouts WHERE id = ?`, workoutID).Scan(&resp.WorkoutID, &resp.Date, &resp.RoutineName)
@@ -766,9 +872,8 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp.Exercises = []WorkoutDetailExercise{} // Bezpieczna inicjalizacja zamiast nulla
+	resp.Exercises = []WorkoutDetailExercise{}
 
-	// Pobranie ćwiczeń
 	rows, err := db.Query(`
 		SELECT we.id, we.exercise_id, e.name, we.position 
 		FROM training_workout_exercises we 
@@ -779,9 +884,8 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var ex WorkoutDetailExercise
 			rows.Scan(&ex.WorkoutExerciseID, &ex.ExerciseID, &ex.Name, &ex.Position)
-			ex.Sets = []WorkoutDetailSet{} // Bezpieczna inicjalizacja
+			ex.Sets = []WorkoutDetailSet{}
 
-			// Pobranie serii dla danego ćwiczenia
 			setRows, errSet := db.Query(`
 				SELECT id, set_number, weight_kg, reps, rir 
 				FROM training_workout_sets 
@@ -800,4 +904,79 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func handleAPIUpdateRoutineSets(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req UpdateRoutineSetsReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	db, _ := sql.Open("sqlite", dbPath)
+	defer db.Close()
+
+	tx, _ := db.Begin()
+	tx.Exec(`DELETE FROM training_routine_sets WHERE routine_exercise_id = ?`, req.RoutineExerciseID)
+	for _, s := range req.Sets {
+		tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, ?)`, req.RoutineExerciseID, s.SetNumber, s.SetType)
+	}
+	tx.Commit()
+	w.WriteHeader(http.StatusOK)
+}
+
+// NOWE: Funkcja synchronizująca Rutynę z Zakończonego Treningu
+func handleAPISyncRoutineFromWorkout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req SyncRoutineReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	db, _ := sql.Open("sqlite", dbPath)
+	defer db.Close()
+
+	tx, _ := db.Begin()
+
+	// 1. Czyścimy starą rutynę (ćwiczenia + sety kaskadowo)
+	tx.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ?`, req.RoutineID)
+
+	// 2. Pobieramy ćwiczenia z odbytego treningu zachowując nową kolejność
+	rows, _ := tx.Query(`SELECT id, exercise_id, position FROM training_workout_exercises WHERE workout_id = ? ORDER BY position`, req.WorkoutID)
+	type wEx struct {
+		id   int
+		exID int
+		pos  int
+	}
+	var wExercises []wEx
+	for rows.Next() {
+		var we wEx
+		rows.Scan(&we.id, &we.exID, &we.pos)
+		wExercises = append(wExercises, we)
+	}
+	rows.Close()
+
+	// 3. Wrzucamy do rutyny jako szablony
+	for _, we := range wExercises {
+		res, _ := tx.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`, req.RoutineID, we.exID, we.pos)
+		newReID, _ := res.LastInsertId()
+
+		setRows, _ := tx.Query(`SELECT set_number, set_type FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, we.id)
+		for setRows.Next() {
+			var sNum int
+			var sType string
+			setRows.Scan(&sNum, &sType)
+			tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, ?)`, newReID, sNum, sType)
+		}
+		setRows.Close()
+	}
+
+	tx.Commit()
+	w.WriteHeader(http.StatusOK)
 }

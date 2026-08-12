@@ -7,7 +7,6 @@ data class SetLogRequest(
     @SerializedName("set_number") val setNumber: Int,
     @SerializedName("reps") val reps: Int,
     @SerializedName("weight_kg") val weightKg: Double,
-    @SerializedName("rir") val rir: Int
-
+    @SerializedName("rir") val rir: Int,
+    @SerializedName("set_type") val setType: String
 )
-

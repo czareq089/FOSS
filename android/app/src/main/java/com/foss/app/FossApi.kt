@@ -1,18 +1,6 @@
 package com.foss.app
 
-import com.foss.app.models.AddRoutineExerciseReq
-import com.foss.app.models.AddWorkoutExerciseReq
-import com.foss.app.models.CreateRoutineReq
-import com.foss.app.models.ExerciseInfo
-import com.foss.app.models.ExerciseItem
-import com.foss.app.models.ReorderRequest
-import com.foss.app.models.Routine
-import com.foss.app.models.RoutineExercisePreview
-import com.foss.app.models.StartWorkoutRequest
-import com.foss.app.models.StartWorkoutResponse
-import com.foss.app.models.VolumeResponse
-import com.foss.app.models.WorkoutDetailResponse
-import com.foss.app.models.WorkoutSummary
+import com.foss.app.models.*
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -36,6 +24,9 @@ interface FossApi {
 
     @PATCH("/api/routines/exercises/reorder")
     suspend fun reorderExercises(@Body request: ReorderRequest): Response<Unit>
+
+    @PATCH("/api/workouts/exercises/reorder")
+    suspend fun reorderWorkoutExercises(@Body request: WorkoutReorderRequest): Response<Unit>
 
     @POST("/api/workouts/start")
     suspend fun startWorkout(@Body request: StartWorkoutRequest): Response<StartWorkoutResponse>
@@ -75,4 +66,10 @@ interface FossApi {
 
     @GET("/api/workouts/details")
     suspend fun getWorkoutDetails(@Query("workout_id") workoutId: Int): Response<WorkoutDetailResponse>
+
+    @POST("/api/routines/exercises/sets/update")
+    suspend fun updateRoutineSets(@Body request: UpdateRoutineSetsReq): retrofit2.Response<Unit>
+
+    @POST("/api/routines/sync")
+    suspend fun syncRoutineFromWorkout(@Body request: SyncRoutineReq): Response<Unit>
 }

@@ -9,23 +9,44 @@ func handleWebIndex(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "web/index.html")
 }
 
-func handleWebDashboardWidgets(w http.ResponseWriter, r *http.Request) {
-	htmlResponse := `
-		<!-- WIDGET 1: Lifted Volume -->
+// ==========================================
+// MODUŁOWE WIDŻETY (HTMX Lazy Loading)
+// ==========================================
+
+func handleWidgetVolume(w http.ResponseWriter, r *http.Request) {
+	html := `
 		<div class="widget">
 			<h3>Volume Lifted (kg)</h3>
-			<div role="group" style="margin-bottom: 1.5rem;">
-				<button class="secondary outline" hx-get="/api/dashboard/volume?range=1d" hx-target="#volume-value">1 Day</button>
-				<button class="secondary outline" hx-get="/api/dashboard/volume?range=7d" hx-target="#volume-value">7 Days</button>
-				<button class="secondary outline" hx-get="/api/dashboard/volume?range=1m" hx-target="#volume-value">1 Month</button>
-				<button class="secondary outline" hx-get="/api/dashboard/volume?range=all" hx-target="#volume-value">All Time</button>
+			<div class="filter-group">
+				<button class="secondary outline">1D</button>
+				<button class="secondary outline">7D</button>
+				<button class="secondary outline">1M</button>
+				<button class="secondary outline">All</button>
 			</div>
-			<div id="volume-value" class="value">0</div>
-		</div>
+			<div class="value">Awaiting...</div>
+		</div>`
+	fmt.Fprint(w, html)
+}
 
-		<!-- WIDGET 2: Nutrition & Macros -->
+func handleWidgetReps(w http.ResponseWriter, r *http.Request) {
+	html := `
 		<div class="widget">
-			<h3>Nutrition Target</h3>
+			<h3>Total Reps</h3>
+			<div class="filter-group">
+				<button class="secondary outline">1D</button>
+				<button class="secondary outline">7D</button>
+				<button class="secondary outline">1M</button>
+				<button class="secondary outline">All</button>
+			</div>
+			<div class="value">Awaiting...</div>
+		</div>`
+	fmt.Fprint(w, html)
+}
+
+func handleWidgetMacros(w http.ResponseWriter, r *http.Request) {
+	html := `
+		<div class="widget">
+			<h3>Daily Macros Target</h3>
 			<div class="macro-label"><span>Calories</span><span>0 / 2700 kcal</span></div>
 			<progress value="0" max="2700"></progress>
 			<div class="macro-label"><span>Protein</span><span>0 / 140 g</span></div>
@@ -35,7 +56,64 @@ func handleWebDashboardWidgets(w http.ResponseWriter, r *http.Request) {
 			<div class="macro-label"><span>Carbs</span><span>0 / 350 g</span></div>
 			<progress value="0" max="350"></progress>
 		</div>`
-	fmt.Fprint(w, htmlResponse)
+	fmt.Fprint(w, html)
+}
+
+func handleWidgetTopExercises(w http.ResponseWriter, r *http.Request) {
+	html := `
+		<div class="widget">
+			<h3>Most Frequent Exercises</h3>
+			<div style="color: var(--color-text-dim); text-align: center; margin-top: 1rem; font-size: 0.9rem;">
+				<p>Log some workouts to see your top movements here.</p>
+			</div>
+		</div>`
+	fmt.Fprint(w, html)
+}
+
+func handleWidgetBiggestProgress(w http.ResponseWriter, r *http.Request) {
+	html := `
+		<div class="widget">
+			<h3>Biggest Progress</h3>
+			<div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
+				<div class="macro-label"><span>1. Deadlift</span><span style="color: var(--color-success);">+ 15 kg</span></div>
+				<div class="macro-label"><span>2. Bench Press</span><span style="color: var(--color-success);">+ 5 kg</span></div>
+				<div class="macro-label"><span>3. Dumbbell Row</span><span style="color: var(--color-success);">+ 2.5 kg</span></div>
+			</div>
+			<div style="color: var(--color-text-dim); text-align: center; margin-top: auto; padding-top: 1rem; font-size: 0.75rem;">
+				*Mock data. Chart coming soon.
+			</div>
+		</div>`
+	fmt.Fprint(w, html)
+}
+
+func handleWidgetOverallProgress(w http.ResponseWriter, r *http.Request) {
+	html := `
+		<div class="widget">
+			<h3>Overall Progress</h3>
+			<div style="color: var(--color-text-dim); text-align: center; margin-top: 1rem; font-size: 0.9rem;">
+				<p>Chart placeholder: Volume trend line over the last 6 months.</p>
+			</div>
+			<div class="value" style="color: var(--color-success); font-size: 2rem;">+ 12.4%</div>
+			<div style="color: var(--color-text-dim); text-align: center; margin-top: auto; padding-top: 1rem; font-size: 0.75rem;">
+				*Mock data. Line chart coming soon.
+			</div>
+		</div>`
+	fmt.Fprint(w, html)
+}
+
+func handleWidgetMacroDeficit(w http.ResponseWriter, r *http.Request) {
+	html := `
+		<div class="widget">
+			<h3>Most Missing Macro</h3>
+			<div style="color: var(--color-text-dim); text-align: center; margin-top: 1rem; font-size: 0.9rem;">
+				<p>Your average daily deficit based on last 7 days.</p>
+			</div>
+			<div class="value" style="color: var(--color-danger); font-size: 1.8rem;">Protein: -35g</div>
+			<div style="color: var(--color-text-dim); text-align: center; margin-top: auto; padding-top: 1rem; font-size: 0.75rem;">
+				*Awaiting Diet Module logic.
+			</div>
+		</div>`
+	fmt.Fprint(w, html)
 }
 
 func handleWebDashboardVolume(w http.ResponseWriter, r *http.Request) {

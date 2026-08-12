@@ -3,18 +3,7 @@ package com.foss.app
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.foss.app.models.AddRoutineExerciseReq
-import com.foss.app.models.AddWorkoutExerciseReq
-import com.foss.app.models.CreateRoutineReq
-import com.foss.app.models.ExerciseInfo
-import com.foss.app.models.ExerciseItem
-import com.foss.app.models.ReorderPosition
-import com.foss.app.models.ReorderRequest
-import com.foss.app.models.Routine
-import com.foss.app.models.RoutineExercisePreview
-import com.foss.app.models.StartWorkoutRequest
-import com.foss.app.models.WorkoutDetailResponse
-import com.foss.app.models.WorkoutSummary
+import com.foss.app.models.*
 import com.foss.app.network.NetworkModule
 import kotlinx.coroutines.launch
 
@@ -28,22 +17,23 @@ sealed class UiState<out T> {
 class WorkoutViewModel : ViewModel() {
 
     private val api = NetworkModule.api
-    private val currentUserId = 1 // hardcoded until auth is implemented
+    private val currentUserId = 1
 
     var routinesState = mutableStateOf<UiState<List<Routine>>>(UiState.Idle)
         private set
     var routineExercisesState = mutableStateOf<UiState<List<RoutineExercisePreview>>>(UiState.Idle)
         private set
-    var workoutState = mutableStateOf<UiState<Pair<Int, List<ExerciseInfo>>>>(UiState.Idle)
+
+    // FIX: Przechowuje teraz Triple(WorkoutId, RoutineId, ListaCwiczen)
+    var workoutState = mutableStateOf<UiState<Triple<Int, Int, List<ExerciseInfo>>>>(UiState.Idle)
         private set
+
     var workoutHistoryState = mutableStateOf<UiState<List<WorkoutSummary>>>(UiState.Idle)
         private set
     var dashboardVolumeState = mutableStateOf<UiState<Double>>(UiState.Idle)
         private set
-
     var exercisesListState = mutableStateOf<UiState<List<ExerciseItem>>>(UiState.Idle)
         private set
-
     var workoutDetailsState = mutableStateOf<UiState<WorkoutDetailResponse>>(UiState.Idle)
         private set
 
@@ -61,6 +51,7 @@ class WorkoutViewModel : ViewModel() {
             }
         }
     }
+
     fun loadRoutineExercises(routineId: Int) {
         viewModelScope.launch {
             routineExercisesState.value = UiState.Loading
@@ -81,7 +72,7 @@ class WorkoutViewModel : ViewModel() {
                 val response = api.startWorkout(StartWorkoutRequest(routineId, currentUserId))
                 val body = response.body()
                 workoutState.value = if (response.isSuccessful && body != null)
-                    UiState.Success(body.workoutId to body.exercises) else UiState.Error("Server error: ${response.code()}")
+                    UiState.Success(Triple(body.workoutId, body.routineId, body.exercises)) else UiState.Error("Server error: ${response.code()}")
             } catch (e: Exception) {
                 workoutState.value = UiState.Error(e.message ?: "Unknown connection error")
             }
@@ -93,12 +84,29 @@ class WorkoutViewModel : ViewModel() {
     }
 
     fun currentWorkoutId(): Int? = (workoutState.value as? UiState.Success)?.data?.first
+    fun currentRoutineId(): Int? = (workoutState.value as? UiState.Success)?.data?.second
 
-    suspend fun logSet(workoutExerciseId: Int, setNumber: Int, reps: Int, weightKg: Double, rir: Int): Boolean {
+    // Pozwala na sztywne zaktualizowanie lokalnego stanu po przesunięciach Drag & Drop
+    fun setWorkoutExercises(exercises: List<ExerciseInfo>) {
+        val currentState = workoutState.value
+        if (currentState is UiState.Success) {
+            workoutState.value = UiState.Success(Triple(currentState.data.first, currentState.data.second, exercises))
+        }
+    }
+
+    suspend fun logSet(workoutExerciseId: Int, setNumber: Int, reps: Int, weightKg: Double, rir: Int, setType: String): Boolean {
         return try {
             api.logSet(
-                SetLogRequest(workoutExerciseId, setNumber, reps, weightKg, rir)
+                SetLogRequest(workoutExerciseId, setNumber, reps, weightKg, rir, setType)
             ).isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun updateRoutineSets(routineExerciseId: Int, sets: List<RoutineSet>): Boolean {
+        return try {
+            api.updateRoutineSets(UpdateRoutineSetsReq(routineExerciseId, sets)).isSuccessful
         } catch (e: Exception) {
             false
         }
@@ -107,6 +115,22 @@ class WorkoutViewModel : ViewModel() {
     suspend fun deleteWorkout(workoutId: Int): Boolean {
         return try {
             api.deleteWorkout(workoutId).isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun reorderWorkoutExercises(workoutId: Int, positions: List<ReorderPosition>): Boolean {
+        return try {
+            api.reorderWorkoutExercises(WorkoutReorderRequest(workoutId, positions)).isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun syncRoutineFromWorkout(routineId: Int, workoutId: Int): Boolean {
+        return try {
+            api.syncRoutineFromWorkout(SyncRoutineReq(routineId, workoutId)).isSuccessful
         } catch (e: Exception) {
             false
         }
@@ -126,7 +150,6 @@ class WorkoutViewModel : ViewModel() {
             }
         }
     }
-
 
     suspend fun reorderExercises(routineId: Int, positions: List<ReorderPosition>): Boolean {
         return try {
@@ -212,12 +235,11 @@ class WorkoutViewModel : ViewModel() {
         return try {
             val response = api.addExerciseToWorkout(AddWorkoutExerciseReq(workoutId, exerciseId))
             if (response.isSuccessful && response.body() != null) {
-                // Bezpośrednia modyfikacja aktualnego stanu - unikamy konieczności robienia oddzielnego GET
                 val currentState = workoutState.value
                 if (currentState is UiState.Success) {
-                    val currentList = currentState.data.second.toMutableList()
+                    val currentList = currentState.data.third.toMutableList()
                     currentList.add(response.body()!!)
-                    workoutState.value = UiState.Success(Pair(workoutId, currentList))
+                    workoutState.value = UiState.Success(Triple(workoutId, currentState.data.second, currentList))
                 }
                 true
             } else false
@@ -226,4 +248,3 @@ class WorkoutViewModel : ViewModel() {
         }
     }
 }
-
