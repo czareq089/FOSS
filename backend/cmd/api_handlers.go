@@ -106,16 +106,6 @@ type AddWorkoutExerciseReq struct {
 // ==========================================
 
 func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Only GET method is allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		userID = "1"
-	}
-
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
@@ -123,24 +113,69 @@ func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(`SELECT id, name FROM training_routines WHERE user_id = ? ORDER BY created_at DESC`, userID)
-	if err != nil {
-		http.Error(w, "Failed to fetch routines", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	routines := []Routine{}
-	for rows.Next() {
-		var rt Routine
-		if err := rows.Scan(&rt.ID, &rt.Name); err != nil {
-			continue
+	switch r.Method {
+	case http.MethodGet:
+		userID := r.URL.Query().Get("user_id")
+		if userID == "" {
+			userID = "1"
 		}
-		routines = append(routines, rt)
-	}
+		rows, err := db.Query(`SELECT id, name FROM training_routines WHERE user_id = ? ORDER BY created_at DESC`, userID)
+		if err != nil {
+			http.Error(w, "Failed to fetch routines", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(routines)
+		routines := []Routine{}
+		for rows.Next() {
+			var rt Routine
+			if err := rows.Scan(&rt.ID, &rt.Name); err != nil {
+				continue
+			}
+			routines = append(routines, rt)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(routines)
+
+	case http.MethodDelete:
+		routineID := r.URL.Query().Get("id")
+		if routineID == "" {
+			http.Error(w, "Missing id", http.StatusBadRequest)
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		if _, err := tx.Exec(`UPDATE training_workouts SET routine_id = NULL WHERE routine_id = ?`, routineID); err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to update workouts", http.StatusInternalServerError)
+			return
+		}
+		if _, err := tx.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ?`, routineID); err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to delete routine exercises", http.StatusInternalServerError)
+			return
+		}
+		if _, err := tx.Exec(`DELETE FROM training_routines WHERE id = ?`, routineID); err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to delete routine", http.StatusInternalServerError)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "Failed to commit deletion", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func handleAPILogSet(w http.ResponseWriter, r *http.Request) {

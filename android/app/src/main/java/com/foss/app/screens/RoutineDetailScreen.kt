@@ -32,6 +32,7 @@ import java.util.Locale
 fun RoutineDetailScreen(
     viewModel: WorkoutViewModel,
     routineId: Int,
+    startInEditMode: Boolean = false,
     onStartWorkout: (workoutId: Int) -> Unit,
     onAddExerciseClick: () -> Unit,
     onBack: () -> Unit
@@ -52,7 +53,7 @@ fun RoutineDetailScreen(
         if (startState is UiState.Success) onStartWorkout(startState.data.first)
     }
 
-    var editMode by remember { mutableStateOf(false) }
+    var editMode by remember { mutableStateOf(startInEditMode) }
     val exercises = remember { mutableStateListOf<RoutineExercisePreview>() }
 
     LaunchedEffect(previewState) {

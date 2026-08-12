@@ -24,6 +24,9 @@ interface FossApi {
     @GET("/api/routines")
     suspend fun getRoutines(@Query("user_id") userId: Int = 1): Response<List<Routine>>
 
+    @DELETE("/api/routines")
+    suspend fun deleteRoutine(@Query("id") routineId: Int): Response<Unit>
+
     @GET("/api/routines/exercises")
     suspend fun getRoutineExercises(
         @Query("routine_id") routineId: Int,

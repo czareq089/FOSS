@@ -5,8 +5,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,6 +24,7 @@ import kotlinx.coroutines.launch
 fun RoutinesScreen(
     viewModel: WorkoutViewModel,
     onRoutineSelected: (Routine) -> Unit,
+    onRoutineEdit: (Routine) -> Unit,
     showTopBar: Boolean = true
 ) {
     LaunchedEffect(Unit) { viewModel.loadRoutines() }
@@ -29,6 +32,8 @@ fun RoutinesScreen(
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var newRoutineName by remember { mutableStateOf("") }
+
+    var pendingDelete by remember { mutableStateOf<Routine?>(null) }
     val scope = rememberCoroutineScope()
 
     val content: @Composable (PaddingValues) -> Unit = { padding ->
@@ -58,7 +63,12 @@ fun RoutinesScreen(
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             items(state.data) { routine ->
-                                RoutineCard(routine = routine, onClick = { onRoutineSelected(routine) })
+                                RoutineCard(
+                                    routine = routine,
+                                    onClick = { onRoutineSelected(routine) },
+                                    onEditClick = { onRoutineEdit(routine) },
+                                    onDeleteClick = { pendingDelete = routine }
+                                )
                             }
                         }
                     }
@@ -114,18 +124,68 @@ fun RoutinesScreen(
             }
         )
     }
+
+    pendingDelete?.let { routine ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete routine?") },
+            text = { Text("Are you sure you want to delete '${routine.name}'? Your workout history will remain intact.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        val success = viewModel.deleteRoutine(routine.id)
+                        if (success) {
+                            viewModel.loadRoutines()
+                        }
+                        pendingDelete = null
+                    }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
 @Composable
-private fun RoutineCard(routine: Routine, onClick: () -> Unit) {
+private fun RoutineCard(
+    routine: Routine,
+    onClick: () -> Unit,
+    onEditClick: () -> Unit,
+    onDeleteClick: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
     Card(onClick = onClick, shape = RoundedCornerShape(16.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(routine.name, style = MaterialTheme.typography.titleMedium)
-            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+            Text(
+                text = routine.name,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f).padding(start = 12.dp)
+            )
+
+            Box {
+                IconButton(onClick = { expanded = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Options")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Edit") },
+                        onClick = { expanded = false; onEditClick() },
+                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        onClick = { expanded = false; onDeleteClick() },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) }
+                    )
+                }
+            }
         }
     }
 }

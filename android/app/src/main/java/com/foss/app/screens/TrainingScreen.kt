@@ -19,7 +19,8 @@ private val TABS = listOf("Routines", "Workouts")
 @Composable
 fun TrainingScreen(
     viewModel: WorkoutViewModel,
-    onRoutineSelected: (Routine) -> Unit
+    onRoutineSelected: (Routine) -> Unit,
+    onRoutineEdit: (Routine) -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
 
@@ -34,7 +35,12 @@ fun TrainingScreen(
             }
         }
         when (selectedTab) {
-            0 -> RoutinesScreen(viewModel = viewModel, onRoutineSelected = onRoutineSelected, showTopBar = false)
+            0 -> RoutinesScreen(
+                viewModel = viewModel,
+                onRoutineSelected = onRoutineSelected,
+                onRoutineEdit = onRoutineEdit,
+                showTopBar = false
+            )
             1 -> WorkoutHistoryScreen(viewModel = viewModel)
         }
     }

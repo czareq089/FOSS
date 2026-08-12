@@ -25,7 +25,6 @@ import com.foss.app.screens.DashboardScreen
 import com.foss.app.screens.DietScreen
 import com.foss.app.screens.ExerciseSelectionScreen
 import com.foss.app.screens.RoutineDetailScreen
-import com.foss.app.screens.RoutinesScreen
 import com.foss.app.screens.TrainingScreen
 import com.foss.app.screens.WorkoutLoggingScreen
 import com.foss.app.ui.theme.FOSSTheme
@@ -74,7 +73,12 @@ fun FossApp() {
             composable(BottomNavItem.Training.route) {
                 TrainingScreen(
                     viewModel = viewModel,
-                    onRoutineSelected = { routine -> navController.navigate("routineDetail/${routine.id}") }
+                    onRoutineSelected = { routine ->
+                        navController.navigate("routineDetail/${routine.id}?edit=false")
+                    },
+                    onRoutineEdit = { routine ->
+                        navController.navigate("routineDetail/${routine.id}?edit=true")
+                    }
                 )
             }
 
@@ -83,16 +87,22 @@ fun FossApp() {
             }
 
             composable(
-                route = "routineDetail/{routineId}",
-                arguments = listOf(navArgument("routineId") { type = NavType.IntType })
+                route = "routineDetail/{routineId}?edit={edit}",
+                arguments = listOf(
+                    navArgument("routineId") { type = NavType.IntType },
+                    navArgument("edit") { type = NavType.BoolType; defaultValue = false }
+                )
             ) { entry ->
                 val routineId = entry.arguments?.getInt("routineId") ?: return@composable
+                val edit = entry.arguments?.getBoolean("edit") ?: false
+
                 RoutineDetailScreen(
                     viewModel = viewModel,
                     routineId = routineId,
+                    startInEditMode = edit,
                     onStartWorkout = { workoutId ->
                         navController.navigate("workoutLogging/$workoutId") {
-                            popUpTo("routineDetail/$routineId") { inclusive = true }
+                            popUpTo("routineDetail/${routineId}?edit=$edit") { inclusive = true }
                         }
                     },
                     onAddExerciseClick = {
@@ -101,7 +111,6 @@ fun FossApp() {
                     onBack = { navController.popBackStack() }
                 )
             }
-
             composable(
                 route = "exerciseSelection/{type}/{id}",
                 arguments = listOf(

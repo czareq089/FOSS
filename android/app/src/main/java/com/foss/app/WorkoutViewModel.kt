@@ -179,6 +179,14 @@ class WorkoutViewModel : ViewModel() {
         }
     }
 
+    suspend fun deleteRoutine(routineId: Int): Boolean {
+        return try {
+            api.deleteRoutine(routineId).isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     suspend fun addExerciseToActiveWorkout(workoutId: Int, exerciseId: Int): Boolean {
         return try {
             val response = api.addExerciseToWorkout(AddWorkoutExerciseReq(workoutId, exerciseId))
