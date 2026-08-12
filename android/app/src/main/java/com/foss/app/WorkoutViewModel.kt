@@ -3,7 +3,11 @@ package com.foss.app
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.foss.app.models.AddRoutineExerciseReq
+import com.foss.app.models.AddWorkoutExerciseReq
+import com.foss.app.models.CreateRoutineReq
 import com.foss.app.models.ExerciseInfo
+import com.foss.app.models.ExerciseItem
 import com.foss.app.models.ReorderPosition
 import com.foss.app.models.ReorderRequest
 import com.foss.app.models.Routine
@@ -34,6 +38,9 @@ class WorkoutViewModel : ViewModel() {
     var workoutHistoryState = mutableStateOf<UiState<List<WorkoutSummary>>>(UiState.Idle)
         private set
     var dashboardVolumeState = mutableStateOf<UiState<Double>>(UiState.Idle)
+        private set
+
+    var exercisesListState = mutableStateOf<UiState<List<ExerciseItem>>>(UiState.Idle)
         private set
 
     fun loadRoutines() {
@@ -132,6 +139,61 @@ class WorkoutViewModel : ViewModel() {
             } catch (e: Exception) {
                 dashboardVolumeState.value = UiState.Error(e.message ?: "Unknown connection error")
             }
+        }
+    }
+
+    fun loadAllExercises() {
+        viewModelScope.launch {
+            exercisesListState.value = UiState.Loading
+            try {
+                val response = api.getAllExercises()
+                exercisesListState.value = if (response.isSuccessful && response.body() != null)
+                    UiState.Success(response.body()!!) else UiState.Error("Server error: ${response.code()}")
+            } catch (e: Exception) {
+                exercisesListState.value = UiState.Error(e.message ?: "Unknown connection error")
+            }
+        }
+    }
+
+    suspend fun addExerciseToRoutine(routineId: Int, exerciseId: Int): Boolean {
+        return try {
+            api.addExerciseToRoutine(AddRoutineExerciseReq(routineId, exerciseId)).isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun removeExerciseFromRoutine(routineId: Int, exerciseId: Int): Boolean {
+        return try {
+            api.removeExerciseFromRoutine(routineId, exerciseId).isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun createRoutine(name: String): Boolean {
+        return try {
+            api.createRoutine(CreateRoutineReq(userId = currentUserId, name = name)).isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun addExerciseToActiveWorkout(workoutId: Int, exerciseId: Int): Boolean {
+        return try {
+            val response = api.addExerciseToWorkout(AddWorkoutExerciseReq(workoutId, exerciseId))
+            if (response.isSuccessful && response.body() != null) {
+                // Bezpośrednia modyfikacja aktualnego stanu - unikamy konieczności robienia oddzielnego GET
+                val currentState = workoutState.value
+                if (currentState is UiState.Success) {
+                    val currentList = currentState.data.second.toMutableList()
+                    currentList.add(response.body()!!)
+                    workoutState.value = UiState.Success(Pair(workoutId, currentList))
+                }
+                true
+            } else false
+        } catch (e: Exception) {
+            false
         }
     }
 }

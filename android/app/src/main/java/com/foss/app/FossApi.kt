@@ -1,5 +1,10 @@
 package com.foss.app
 
+import com.foss.app.models.AddRoutineExerciseReq
+import com.foss.app.models.AddWorkoutExerciseReq
+import com.foss.app.models.CreateRoutineReq
+import com.foss.app.models.ExerciseInfo
+import com.foss.app.models.ExerciseItem
 import com.foss.app.models.ReorderRequest
 import com.foss.app.models.Routine
 import com.foss.app.models.RoutineExercisePreview
@@ -45,4 +50,22 @@ interface FossApi {
         @Query("range") range: String,
         @Query("user_id") userId: Int = 1
     ): Response<VolumeResponse>
+
+    @GET("/api/exercises")
+    suspend fun getAllExercises(): Response<List<ExerciseItem>>
+
+    @POST("/api/routines/exercises/add")
+    suspend fun addExerciseToRoutine(@Body request: AddRoutineExerciseReq): Response<Unit>
+
+    @DELETE("/api/routines/exercises/remove")
+    suspend fun removeExerciseFromRoutine(
+        @Query("routine_id") routineId: Int,
+        @Query("exercise_id") exerciseId: Int
+    ): Response<Unit>
+
+    @POST("/api/routines/create")
+    suspend fun createRoutine(@Body request: CreateRoutineReq): Response<Unit>
+
+    @POST("/api/workouts/exercises/add")
+    suspend fun addExerciseToWorkout(@Body request: AddWorkoutExerciseReq): Response<ExerciseInfo>
 }

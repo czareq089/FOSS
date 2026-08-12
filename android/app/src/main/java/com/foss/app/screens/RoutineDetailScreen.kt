@@ -7,7 +7,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
@@ -31,6 +33,7 @@ fun RoutineDetailScreen(
     viewModel: WorkoutViewModel,
     routineId: Int,
     onStartWorkout: (workoutId: Int) -> Unit,
+    onAddExerciseClick: () -> Unit,
     onBack: () -> Unit
 ) {
     LaunchedEffect(routineId) {
@@ -69,26 +72,24 @@ fun RoutineDetailScreen(
                     }
                 },
                 actions = {
-                    if (exercises.isNotEmpty()) {
-                        IconButton(onClick = {
-                            if (editMode) {
-                                val positions = exercises.mapIndexed { index, ex ->
-                                    ReorderPosition(exerciseId = ex.exerciseId, position = index + 1)
-                                }
-                                scope.launch {
-                                    viewModel.reorderExercises(routineId, positions)
-                                    viewModel.loadRoutineExercises(routineId)
-                                }
-                                editMode = false
-                            } else {
-                                editMode = true
+                    IconButton(onClick = {
+                        if (editMode) {
+                            val positions = exercises.mapIndexed { index, ex ->
+                                ReorderPosition(exerciseId = ex.exerciseId, position = index + 1)
                             }
-                        }) {
-                            Icon(
-                                if (editMode) Icons.Filled.Check else Icons.Filled.Edit,
-                                contentDescription = if (editMode) "Save order" else "Reorder exercises"
-                            )
+                            scope.launch {
+                                viewModel.reorderExercises(routineId, positions)
+                                viewModel.loadRoutineExercises(routineId)
+                            }
+                            editMode = false
+                        } else {
+                            editMode = true
                         }
+                    }) {
+                        Icon(
+                            if (editMode) Icons.Filled.Check else Icons.Filled.Edit,
+                            contentDescription = if (editMode) "Save routine" else "Edit routine"
+                        )
                     }
                 }
             )
@@ -139,10 +140,24 @@ fun RoutineDetailScreen(
                     }
                 }
                 is UiState.Success -> {
-                    if (exercises.isEmpty()) {
-                        Text("This routine has no exercises yet.", modifier = Modifier.align(Alignment.Center))
+                    if (exercises.isEmpty() && !editMode) {
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("This routine has no exercises yet.")
+                            Spacer(Modifier.height(12.dp))
+                            OutlinedButton(onClick = { editMode = true }) {
+                                Text("Add exercise")
+                            }
+                        }
                     } else if (editMode) {
-                        ReorderableExerciseList(exercises = exercises)
+                        ReorderableExerciseList(
+                            routineId = routineId,
+                            viewModel = viewModel,
+                            exercises = exercises,
+                            onAddExerciseClick = onAddExerciseClick
+                        )
                     } else {
                         LazyColumn(
                             contentPadding = PaddingValues(16.dp),
@@ -185,59 +200,98 @@ private fun ExercisePreviewCard(exercise: RoutineExercisePreview) {
 private val DRAG_ROW_HEIGHT = 64.dp
 
 @Composable
-private fun ReorderableExerciseList(exercises: androidx.compose.runtime.snapshots.SnapshotStateList<RoutineExercisePreview>) {
+private fun ReorderableExerciseList(
+    routineId: Int,
+    viewModel: WorkoutViewModel,
+    exercises: androidx.compose.runtime.snapshots.SnapshotStateList<RoutineExercisePreview>,
+    onAddExerciseClick: () -> Unit
+) {
     val density = LocalDensity.current
     val rowHeightPx = with(density) { DRAG_ROW_HEIGHT.toPx() }
+    val scope = rememberCoroutineScope()
 
     var draggedIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffsetY by remember { mutableStateOf(0f) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(
-            "Long-press and drag to reorder",
+            "Long-press to reorder, or delete exercises",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 12.dp)
         )
-        exercises.forEachIndexed { index, exercise ->
-            val isDragged = draggedIndex == index
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(DRAG_ROW_HEIGHT)
-                    .padding(vertical = 4.dp)
-                    .graphicsLayer { translationY = if (isDragged) dragOffsetY else 0f }
-                    .pointerInput(exercises.size) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { draggedIndex = index; dragOffsetY = 0f },
-                            onDragEnd = { draggedIndex = null; dragOffsetY = 0f },
-                            onDragCancel = { draggedIndex = null; dragOffsetY = 0f },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                dragOffsetY += dragAmount.y
-                                val currentIndex = draggedIndex ?: return@detectDragGesturesAfterLongPress
-                                val targetIndex = (currentIndex + (dragOffsetY / rowHeightPx).toInt())
-                                    .coerceIn(0, exercises.size - 1)
-                                if (targetIndex != currentIndex) {
-                                    val moved = exercises.removeAt(currentIndex)
-                                    exercises.add(targetIndex, moved)
-                                    draggedIndex = targetIndex
-                                    dragOffsetY -= (targetIndex - currentIndex) * rowHeightPx
+
+        Column(modifier = Modifier.weight(1f)) {
+            exercises.forEachIndexed { index, exercise ->
+                val isDragged = draggedIndex == index
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(DRAG_ROW_HEIGHT)
+                        .padding(vertical = 4.dp)
+                        .graphicsLayer { translationY = if (isDragged) dragOffsetY else 0f }
+                        .pointerInput(exercises.size) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { draggedIndex = index; dragOffsetY = 0f },
+                                onDragEnd = { draggedIndex = null; dragOffsetY = 0f },
+                                onDragCancel = { draggedIndex = null; dragOffsetY = 0f },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffsetY += dragAmount.y
+                                    val currentIndex = draggedIndex ?: return@detectDragGesturesAfterLongPress
+                                    val targetIndex = (currentIndex + (dragOffsetY / rowHeightPx).toInt())
+                                        .coerceIn(0, exercises.size - 1)
+                                    if (targetIndex != currentIndex) {
+                                        val moved = exercises.removeAt(currentIndex)
+                                        exercises.add(targetIndex, moved)
+                                        draggedIndex = targetIndex
+                                        dragOffsetY -= (targetIndex - currentIndex) * rowHeightPx
+                                    }
+                                }
+                            )
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.DragHandle, contentDescription = "Drag to reorder")
+                            Spacer(Modifier.width(12.dp))
+                            Text(exercise.name, style = MaterialTheme.typography.titleMedium)
+                        }
+
+                        IconButton(onClick = {
+                            scope.launch {
+                                val success = viewModel.removeExerciseFromRoutine(routineId, exercise.exerciseId)
+                                if (success) {
+                                    exercises.removeAt(index)
                                 }
                             }
-                        )
+                        }) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Delete exercise",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(exercise.name, style = MaterialTheme.typography.titleMedium)
-                    Icon(Icons.Filled.DragHandle, contentDescription = "Drag to reorder")
                 }
             }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        OutlinedButton(
+            onClick = onAddExerciseClick,
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Add exercise")
         }
     }
 }

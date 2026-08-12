@@ -58,3 +58,25 @@ data class ReorderRequest(
     @SerializedName("routine_id") val routineId: Int,
     @SerializedName("positions") val positions: List<ReorderPosition>
 )
+
+data class ExerciseItem(
+    @SerializedName("id") val id: Int,
+    @SerializedName("name") val name: String,
+    @SerializedName("type") val type: String,
+    @SerializedName("equipment") val equipment: String
+)
+
+data class AddRoutineExerciseReq(
+    @SerializedName("routine_id") val routineId: Int,
+    @SerializedName("exercise_id") val exerciseId: Int
+)
+
+data class CreateRoutineReq(
+    @SerializedName("user_id") val userId: Int,
+    @SerializedName("name") val name: String
+)
+
+data class AddWorkoutExerciseReq(
+    @SerializedName("workout_id") val workoutId: Int,
+    @SerializedName("exercise_id") val exerciseId: Int
+)

@@ -6,15 +6,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
 import com.foss.app.models.Routine
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -25,6 +26,10 @@ fun RoutinesScreen(
 ) {
     LaunchedEffect(Unit) { viewModel.loadRoutines() }
     val state = viewModel.routinesState.value
+
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var newRoutineName by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
 
     val content: @Composable (PaddingValues) -> Unit = { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -59,6 +64,16 @@ fun RoutinesScreen(
                     }
                 }
             }
+
+            FloatingActionButton(
+                onClick = { showCreateDialog = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.primary
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Create routine")
+            }
         }
     }
 
@@ -66,6 +81,38 @@ fun RoutinesScreen(
         Scaffold(topBar = { TopAppBar(title = { Text("Your routines") }) }) { padding -> content(padding) }
     } else {
         content(PaddingValues())
+    }
+
+    if (showCreateDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateDialog = false },
+            title = { Text("Create New Routine") },
+            text = {
+                OutlinedTextField(
+                    value = newRoutineName,
+                    onValueChange = { newRoutineName = it },
+                    label = { Text("Routine name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newRoutineName.isNotBlank()) {
+                        scope.launch {
+                            val success = viewModel.createRoutine(newRoutineName)
+                            if (success) {
+                                newRoutineName = ""
+                                showCreateDialog = false
+                                viewModel.loadRoutines()
+                            }
+                        }
+                    }
+                }) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 

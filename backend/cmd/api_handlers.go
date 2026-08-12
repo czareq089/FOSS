@@ -91,6 +91,16 @@ type AddRoutineExerciseReq struct {
 	ExerciseID int `json:"exercise_id"`
 }
 
+type CreateRoutineReq struct {
+	UserID int    `json:"user_id"`
+	Name   string `json:"name"`
+}
+
+type AddWorkoutExerciseReq struct {
+	WorkoutID  int `json:"workout_id"`
+	ExerciseID int `json:"exercise_id"`
+}
+
 // ==========================================
 // FUNKCJE OBSŁUGI API
 // ==========================================
@@ -593,4 +603,76 @@ func handleAPIRoutineExerciseRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleAPIRoutineCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req CreateRoutineReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`INSERT INTO training_routines (user_id, name) VALUES (?, ?)`, req.UserID, req.Name)
+	if err != nil {
+		http.Error(w, "Failed to create routine", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+func handleAPIWorkoutExerciseAdd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req AddWorkoutExerciseReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var maxPos int
+	_ = db.QueryRow(`SELECT COALESCE(MAX(position), 0) FROM training_workout_exercises WHERE workout_id = ?`, req.WorkoutID).Scan(&maxPos)
+
+	res, err := db.Exec(`INSERT INTO training_workout_exercises (workout_id, exercise_id, position) VALUES (?, ?, ?)`,
+		req.WorkoutID, req.ExerciseID, maxPos+1)
+	if err != nil {
+		http.Error(w, "Failed to add exercise to workout", http.StatusInternalServerError)
+		return
+	}
+
+	weID, _ := res.LastInsertId()
+
+	var exName string
+	_ = db.QueryRow(`SELECT name FROM training_exercises WHERE id = ?`, req.ExerciseID).Scan(&exName)
+
+	newExercise := ExerciseInfo{
+		WorkoutExerciseID: int(weID),
+		ExerciseID:        req.ExerciseID,
+		Name:              exName,
+		Position:          maxPos + 1,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(newExercise)
 }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,13 +26,14 @@ class SetRowState(val setNumber: Int) {
     var confirmed by mutableStateOf(false)
     var submitting by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
-    var autoFilled by mutableStateOf(true) // dopóki true, wiersz przyjmuje wartości z pierwszego seta
+    var autoFilled by mutableStateOf(true)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkoutLoggingScreen(
     viewModel: WorkoutViewModel,
+    onAddExerciseClick: () -> Unit,
     onFinish: () -> Unit,
     onCancelWorkout: () -> Unit
 ) {
@@ -66,6 +68,18 @@ fun WorkoutLoggingScreen(
                 ) {
                     items(exercises) { exercise ->
                         ExerciseLogCard(viewModel = viewModel, exercise = exercise)
+                    }
+
+                    item {
+                        OutlinedButton(
+                            onClick = onAddExerciseClick,
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Add exercise to active workout")
+                        }
                     }
                 }
             } else {

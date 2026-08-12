@@ -10,6 +10,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -22,10 +23,13 @@ import com.foss.app.navigation.BottomNavItem
 import com.foss.app.navigation.FossBottomNavBar
 import com.foss.app.screens.DashboardScreen
 import com.foss.app.screens.DietScreen
+import com.foss.app.screens.ExerciseSelectionScreen
 import com.foss.app.screens.RoutineDetailScreen
+import com.foss.app.screens.RoutinesScreen
 import com.foss.app.screens.TrainingScreen
 import com.foss.app.screens.WorkoutLoggingScreen
 import com.foss.app.ui.theme.FOSSTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,6 +95,37 @@ fun FossApp() {
                             popUpTo("routineDetail/$routineId") { inclusive = true }
                         }
                     },
+                    onAddExerciseClick = {
+                        navController.navigate("exerciseSelection/routine/$routineId")
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = "exerciseSelection/{type}/{id}",
+                arguments = listOf(
+                    navArgument("type") { type = NavType.StringType },
+                    navArgument("id") { type = NavType.IntType }
+                )
+            ) { entry ->
+                val type = entry.arguments?.getString("type") ?: "routine"
+                val id = entry.arguments?.getInt("id") ?: return@composable
+                val scope = rememberCoroutineScope()
+
+                ExerciseSelectionScreen(
+                    viewModel = viewModel,
+                    onExerciseSelected = { exerciseId ->
+                        scope.launch {
+                            if (type == "routine") {
+                                val success = viewModel.addExerciseToRoutine(id, exerciseId)
+                                if (success) navController.popBackStack()
+                            } else if (type == "workout") {
+                                val success = viewModel.addExerciseToActiveWorkout(id, exerciseId)
+                                if (success) navController.popBackStack()
+                            }
+                        }
+                    },
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -98,9 +133,13 @@ fun FossApp() {
             composable(
                 route = "workoutLogging/{workoutId}",
                 arguments = listOf(navArgument("workoutId") { type = NavType.IntType })
-            ) {
+            ) { entry ->
+                val workoutId = entry.arguments?.getInt("workoutId") ?: return@composable
                 WorkoutLoggingScreen(
                     viewModel = viewModel,
+                    onAddExerciseClick = {
+                        navController.navigate("exerciseSelection/workout/$workoutId")
+                    },
                     onFinish = {
                         navController.navigate(BottomNavItem.Training.route) {
                             popUpTo(BottomNavItem.Dashboard.route)
