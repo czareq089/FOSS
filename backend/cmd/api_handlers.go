@@ -79,6 +79,18 @@ type VolumeResponse struct {
 	VolumeKg float64 `json:"volume_kg"`
 }
 
+type ExerciseItem struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Equipment string `json:"equipment"`
+}
+
+type AddRoutineExerciseReq struct {
+	RoutineID  int `json:"routine_id"`
+	ExerciseID int `json:"exercise_id"`
+}
+
 // ==========================================
 // FUNKCJE OBSŁUGI API
 // ==========================================
@@ -491,4 +503,94 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 		WorkoutID: int(workoutID),
 		Exercises: exercises,
 	})
+}
+
+func handleAPIExercisesList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT id, name, type, equipment FROM training_exercises ORDER BY name`)
+	if err != nil {
+		http.Error(w, "Query error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var exercises []ExerciseItem
+	for rows.Next() {
+		var ex ExerciseItem
+		if err := rows.Scan(&ex.ID, &ex.Name, &ex.Type, &ex.Equipment); err == nil {
+			exercises = append(exercises, ex)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(exercises)
+}
+
+func handleAPIRoutineExerciseAdd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req AddRoutineExerciseReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	// Pobieramy najwyższą pozycję w aktualnej rutynie
+	var maxPos int
+	_ = db.QueryRow(`SELECT COALESCE(MAX(position), 0) FROM training_routine_exercises WHERE routine_id = ?`, req.RoutineID).Scan(&maxPos)
+
+	// Dodajemy ćwiczenie na pozycję maxPos + 1 (na sam koniec) z domyślną liczbą 3 serii
+	_, err = db.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`,
+		req.RoutineID, req.ExerciseID, maxPos+1)
+
+	if err != nil {
+		http.Error(w, "Failed to add exercise", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleAPIRoutineExerciseRemove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	routineID := r.URL.Query().Get("routine_id")
+	exerciseID := r.URL.Query().Get("exercise_id")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ? AND exercise_id = ?`, routineID, exerciseID)
+	if err != nil {
+		http.Error(w, "Failed to delete exercise", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
