@@ -1,5 +1,6 @@
 package com.foss.app.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -177,13 +178,16 @@ fun RoutineDetailScreen(
 
 @Composable
 private fun ExercisePreviewCard(exercise: RoutineExercisePreview) {
-    Card(shape = RoundedCornerShape(16.dp)) {
+    OutlinedCard(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(exercise.name, style = MaterialTheme.typography.titleMedium)
-                Text("Default: ${exercise.defaultSets} sets", style = MaterialTheme.typography.labelSmall)
             }
-            if (exercise.lastSets.isNotEmpty()) {
+            if (!exercise.lastSets.isNullOrEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 val summary = exercise.lastSets.joinToString(separator = "  ") { s ->
                     String.format(Locale.US, "%.1fkg×%d", s.weightKg, s.reps)

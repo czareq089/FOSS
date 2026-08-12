@@ -1,5 +1,6 @@
 package com.foss.app.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -60,9 +61,10 @@ fun RoutinesScreen(
                     } else {
                         LazyColumn(
                             contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize() // Zapewnia płynniejsze działanie LazyColumn
                         ) {
-                            items(state.data) { routine ->
+                            items(state.data, key = { it.id }) { routine ->
                                 RoutineCard(
                                     routine = routine,
                                     onClick = { onRoutineSelected(routine) },
@@ -80,7 +82,8 @@ fun RoutinesScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp),
-                containerColor = MaterialTheme.colorScheme.primary
+                containerColor = MaterialTheme.colorScheme.primary,
+                shape = RoundedCornerShape(12.dp) // Techniczny, lekko zaokrąglony kształt
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "Create routine")
             }
@@ -93,26 +96,33 @@ fun RoutinesScreen(
         content(PaddingValues())
     }
 
+    // Nowoczesny, surowy Dialog do tworzenia rutyny
     if (showCreateDialog) {
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
-            title = { Text("Create New Routine") },
+            title = { Text("Create New Routine", color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 OutlinedTextField(
                     value = newRoutineName,
                     onValueChange = { newRoutineName = it },
                     label = { Text("Routine name") },
-                    singleLine = true
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    ),
+                    shape = RoundedCornerShape(8.dp)
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     if (newRoutineName.isNotBlank()) {
+                        val nameToSave = newRoutineName
+                        showCreateDialog = false // Zamykamy od razu dla responsywności
+                        newRoutineName = ""
                         scope.launch {
-                            val success = viewModel.createRoutine(newRoutineName)
+                            val success = viewModel.createRoutine(nameToSave)
                             if (success) {
-                                newRoutineName = ""
-                                showCreateDialog = false
                                 viewModel.loadRoutines()
                             }
                         }
@@ -120,30 +130,34 @@ fun RoutinesScreen(
                 }) { Text("Create") }
             },
             dismissButton = {
-                TextButton(onClick = { showCreateDialog = false }) { Text("Cancel") }
-            }
+                TextButton(onClick = { showCreateDialog = false }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(8.dp) // Wymuszony ostry róg
         )
     }
 
+    // Nowoczesny, surowy Dialog do usuwania
     pendingDelete?.let { routine ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete routine?") },
-            text = { Text("Are you sure you want to delete '${routine.name}'? Your workout history will remain intact.") },
+            title = { Text("Delete routine?", color = MaterialTheme.colorScheme.onSurface) },
+            text = { Text("Are you sure you want to delete '${routine.name}'? Your workout history will remain intact.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
                 TextButton(onClick = {
+                    val routineId = routine.id
+                    pendingDelete = null // Zamykamy od razu dla responsywności
                     scope.launch {
-                        val success = viewModel.deleteRoutine(routine.id)
-                        if (success) {
-                            viewModel.loadRoutines()
-                        }
-                        pendingDelete = null
+                        val success = viewModel.deleteRoutine(routineId)
+                        if (success) viewModel.loadRoutines()
                     }
                 }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
-            }
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(8.dp) // Wymuszony ostry róg
         )
     }
 }
@@ -157,7 +171,14 @@ private fun RoutineCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Card(onClick = onClick, shape = RoundedCornerShape(16.dp)) {
+    // Wymuszamy płaski, obramowany wygląd karty zgodny z webowym dashboardem
+    OutlinedCard(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth() // Optymalizacja renderowania szerokości
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -166,24 +187,32 @@ private fun RoutineCard(
             Text(
                 text = routine.name,
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f).padding(start = 12.dp)
+                modifier = Modifier.weight(1f).padding(start = 12.dp),
+                color = MaterialTheme.colorScheme.onSurface
             )
 
             Box {
                 IconButton(onClick = { expanded = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "Options")
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Edit") },
-                        onClick = { expanded = false; onEditClick() },
-                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                        onClick = { expanded = false; onDeleteClick() },
-                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) }
-                    )
+
+                // Modyfikacja DropdownMenu (żeby usunąć ewentualne fiolety z domyślnego tła)
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(surface = MaterialTheme.colorScheme.surfaceVariant)) {
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Edit", color = MaterialTheme.colorScheme.onSurface) },
+                            onClick = { expanded = false; onEditClick() },
+                            leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            onClick = { expanded = false; onDeleteClick() },
+                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) }
+                        )
+                    }
                 }
             }
         }

@@ -4,6 +4,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -26,6 +32,7 @@ import com.foss.app.screens.DietScreen
 import com.foss.app.screens.ExerciseSelectionScreen
 import com.foss.app.screens.RoutineDetailScreen
 import com.foss.app.screens.TrainingScreen
+import com.foss.app.screens.WorkoutDetailScreen
 import com.foss.app.screens.WorkoutLoggingScreen
 import com.foss.app.ui.theme.FOSSTheme
 import kotlinx.coroutines.launch
@@ -64,7 +71,31 @@ fun FossApp() {
         NavHost(
             navController = navController,
             startDestination = BottomNavItem.Dashboard.route,
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()),
+            enterTransition = {
+                slideInHorizontally(
+                    initialOffsetX = { 100 },
+                    animationSpec = tween(150, easing = FastOutSlowInEasing)
+                ) + fadeIn(animationSpec = tween(150))
+            },
+            exitTransition = {
+                slideOutHorizontally(
+                    targetOffsetX = { -100 },
+                    animationSpec = tween(150, easing = FastOutSlowInEasing)
+                ) + fadeOut(animationSpec = tween(150))
+            },
+            popEnterTransition = {
+                slideInHorizontally(
+                    initialOffsetX = { -100 },
+                    animationSpec = tween(150, easing = FastOutSlowInEasing)
+                ) + fadeIn(animationSpec = tween(150))
+            },
+            popExitTransition = {
+                slideOutHorizontally(
+                    targetOffsetX = { 100 },
+                    animationSpec = tween(150, easing = FastOutSlowInEasing)
+                ) + fadeOut(animationSpec = tween(150))
+            }
         ) {
             composable(BottomNavItem.Dashboard.route) {
                 DashboardScreen()
@@ -78,6 +109,12 @@ fun FossApp() {
                     },
                     onRoutineEdit = { routine ->
                         navController.navigate("routineDetail/${routine.id}?edit=true")
+                    },
+                    onWorkoutSelected = { workout ->
+                        navController.navigate("workoutDetail/${workout.workoutId}?edit=false")
+                    },
+                    onWorkoutEdit = { workout ->
+                        navController.navigate("workoutDetail/${workout.workoutId}?edit=true")
                     }
                 )
             }
@@ -111,6 +148,25 @@ fun FossApp() {
                     onBack = { navController.popBackStack() }
                 )
             }
+
+            composable(
+                route = "workoutDetail/{workoutId}?edit={edit}",
+                arguments = listOf(
+                    navArgument("workoutId") { type = NavType.IntType },
+                    navArgument("edit") { type = NavType.BoolType; defaultValue = false }
+                )
+            ) { entry ->
+                val workoutId = entry.arguments?.getInt("workoutId") ?: return@composable
+                val edit = entry.arguments?.getBoolean("edit") ?: false
+
+                WorkoutDetailScreen(
+                    viewModel = viewModel,
+                    workoutId = workoutId,
+                    startInEditMode = edit,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
             composable(
                 route = "exerciseSelection/{type}/{id}",
                 arguments = listOf(

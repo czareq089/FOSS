@@ -13,6 +13,7 @@ import com.foss.app.models.ReorderRequest
 import com.foss.app.models.Routine
 import com.foss.app.models.RoutineExercisePreview
 import com.foss.app.models.StartWorkoutRequest
+import com.foss.app.models.WorkoutDetailResponse
 import com.foss.app.models.WorkoutSummary
 import com.foss.app.network.NetworkModule
 import kotlinx.coroutines.launch
@@ -43,9 +44,14 @@ class WorkoutViewModel : ViewModel() {
     var exercisesListState = mutableStateOf<UiState<List<ExerciseItem>>>(UiState.Idle)
         private set
 
+    var workoutDetailsState = mutableStateOf<UiState<WorkoutDetailResponse>>(UiState.Idle)
+        private set
+
     fun loadRoutines() {
         viewModelScope.launch {
-            routinesState.value = UiState.Loading
+            if (routinesState.value !is UiState.Success) {
+                routinesState.value = UiState.Loading
+            }
             try {
                 val response = api.getRoutines(currentUserId)
                 routinesState.value = if (response.isSuccessful && response.body() != null)
@@ -55,7 +61,6 @@ class WorkoutViewModel : ViewModel() {
             }
         }
     }
-
     fun loadRoutineExercises(routineId: Int) {
         viewModelScope.launch {
             routineExercisesState.value = UiState.Loading
@@ -109,7 +114,9 @@ class WorkoutViewModel : ViewModel() {
 
     fun loadWorkoutHistory() {
         viewModelScope.launch {
-            workoutHistoryState.value = UiState.Loading
+            if (workoutHistoryState.value !is UiState.Success) {
+                workoutHistoryState.value = UiState.Loading
+            }
             try {
                 val response = api.getWorkoutHistory(currentUserId)
                 workoutHistoryState.value = if (response.isSuccessful && response.body() != null)
@@ -119,6 +126,7 @@ class WorkoutViewModel : ViewModel() {
             }
         }
     }
+
 
     suspend fun reorderExercises(routineId: Int, positions: List<ReorderPosition>): Boolean {
         return try {
@@ -151,6 +159,19 @@ class WorkoutViewModel : ViewModel() {
                     UiState.Success(response.body()!!) else UiState.Error("Server error: ${response.code()}")
             } catch (e: Exception) {
                 exercisesListState.value = UiState.Error(e.message ?: "Unknown connection error")
+            }
+        }
+    }
+
+    fun loadWorkoutDetails(workoutId: Int) {
+        viewModelScope.launch {
+            workoutDetailsState.value = UiState.Loading
+            try {
+                val response = api.getWorkoutDetails(workoutId)
+                workoutDetailsState.value = if (response.isSuccessful && response.body() != null)
+                    UiState.Success(response.body()!!) else UiState.Error("Server error: ${response.code()}")
+            } catch (e: Exception) {
+                workoutDetailsState.value = UiState.Error(e.message ?: "Unknown connection error")
             }
         }
     }
@@ -205,3 +226,4 @@ class WorkoutViewModel : ViewModel() {
         }
     }
 }
+

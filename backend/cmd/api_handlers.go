@@ -101,6 +101,29 @@ type AddWorkoutExerciseReq struct {
 	ExerciseID int `json:"exercise_id"`
 }
 
+type WorkoutDetailSet struct {
+	SetID     int     `json:"set_id"`
+	SetNumber int     `json:"set_number"`
+	WeightKg  float64 `json:"weight_kg"`
+	Reps      int     `json:"reps"`
+	Rir       int     `json:"rir"`
+}
+
+type WorkoutDetailExercise struct {
+	WorkoutExerciseID int                `json:"workout_exercise_id"`
+	ExerciseID        int                `json:"exercise_id"`
+	Name              string             `json:"name"`
+	Position          int                `json:"position"`
+	Sets              []WorkoutDetailSet `json:"sets"`
+}
+
+type WorkoutDetailResponse struct {
+	WorkoutID   int                     `json:"workout_id"`
+	RoutineName string                  `json:"routine_name"`
+	Date        string                  `json:"date"`
+	Exercises   []WorkoutDetailExercise `json:"exercises"`
+}
+
 // ==========================================
 // FUNKCJE OBSŁUGI API
 // ==========================================
@@ -277,7 +300,7 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		var lastSets []LastSetValue
+		lastSets := []LastSetValue{}
 		for setRows.Next() {
 			var s LastSetValue
 			if err := setRows.Scan(&s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir); err != nil {
@@ -710,4 +733,71 @@ func handleAPIWorkoutExerciseAdd(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(newExercise)
+}
+
+func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	workoutID := r.URL.Query().Get("workout_id")
+	if workoutID == "" {
+		http.Error(w, "Missing workout_id", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var resp WorkoutDetailResponse
+
+	// Pobranie nagłówka treningu
+	err = db.QueryRow(`
+		SELECT id, date, COALESCE((SELECT name FROM training_routines WHERE id = routine_id), 'Custom workout') 
+		FROM training_workouts WHERE id = ?`, workoutID).Scan(&resp.WorkoutID, &resp.Date, &resp.RoutineName)
+
+	if err != nil {
+		http.Error(w, "Workout not found", http.StatusNotFound)
+		return
+	}
+
+	resp.Exercises = []WorkoutDetailExercise{} // Bezpieczna inicjalizacja zamiast nulla
+
+	// Pobranie ćwiczeń
+	rows, err := db.Query(`
+		SELECT we.id, we.exercise_id, e.name, we.position 
+		FROM training_workout_exercises we 
+		JOIN training_exercises e ON e.id = we.exercise_id 
+		WHERE we.workout_id = ? ORDER BY we.position`, workoutID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var ex WorkoutDetailExercise
+			rows.Scan(&ex.WorkoutExerciseID, &ex.ExerciseID, &ex.Name, &ex.Position)
+			ex.Sets = []WorkoutDetailSet{} // Bezpieczna inicjalizacja
+
+			// Pobranie serii dla danego ćwiczenia
+			setRows, errSet := db.Query(`
+				SELECT id, set_number, weight_kg, reps, rir 
+				FROM training_workout_sets 
+				WHERE workout_exercise_id = ? ORDER BY set_number`, ex.WorkoutExerciseID)
+			if errSet == nil {
+				for setRows.Next() {
+					var s WorkoutDetailSet
+					setRows.Scan(&s.SetID, &s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir)
+					ex.Sets = append(ex.Sets, s)
+				}
+				setRows.Close()
+			}
+			resp.Exercises = append(resp.Exercises, ex)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

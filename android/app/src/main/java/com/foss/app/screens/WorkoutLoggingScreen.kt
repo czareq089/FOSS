@@ -1,5 +1,7 @@
 package com.foss.app.screens
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -42,6 +44,11 @@ fun WorkoutLoggingScreen(
     var cancelling by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    // FIX: Przechwytywanie systemowego przycisku "Wstecz" na telefonie
+    BackHandler {
+        showCancelDialog = true
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -54,7 +61,11 @@ fun WorkoutLoggingScreen(
             )
         },
         bottomBar = {
-            Button(onClick = onFinish, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Button(
+                onClick = onFinish,
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = RoundedCornerShape(8.dp) // Ostry, techniczny róg
+            ) {
                 Text("Finish workout")
             }
         }
@@ -64,9 +75,12 @@ fun WorkoutLoggingScreen(
                 val exercises = state.data.second
                 LazyColumn(
                     contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(exercises) { exercise ->
+                    items(
+                        items = exercises,
+                        key = { it.workoutExerciseId }
+                    ) { exercise ->
                         ExerciseLogCard(viewModel = viewModel, exercise = exercise)
                     }
 
@@ -74,11 +88,12 @@ fun WorkoutLoggingScreen(
                         OutlinedButton(
                             onClick = onAddExerciseClick,
                             modifier = Modifier.fillMaxWidth().height(50.dp),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(8.dp), // Ostry, techniczny róg
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                         ) {
-                            Icon(Icons.Filled.Add, contentDescription = null)
+                            Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.width(8.dp))
-                            Text("Add exercise to active workout")
+                            Text("Add exercise to active workout", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -88,11 +103,12 @@ fun WorkoutLoggingScreen(
         }
     }
 
+    // FIX: Surowy, dopasowany motyw dla okna anulowania
     if (showCancelDialog) {
         AlertDialog(
             onDismissRequest = { if (!cancelling) showCancelDialog = false },
-            title = { Text("Cancel this workout?") },
-            text = { Text("Any sets you've already logged will be deleted. This can't be undone.") },
+            title = { Text("Cancel this workout?", color = MaterialTheme.colorScheme.onSurface) },
+            text = { Text("Any sets you've already logged will be deleted. This can't be undone.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
                 TextButton(
                     enabled = !cancelling,
@@ -114,8 +130,12 @@ fun WorkoutLoggingScreen(
                 ) { Text("Cancel workout", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(enabled = !cancelling, onClick = { showCancelDialog = false }) { Text("Keep going") }
-            }
+                TextButton(enabled = !cancelling, onClick = { showCancelDialog = false }) {
+                    Text("Keep going", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(8.dp) // Wymuszony ostry róg
         )
     }
 }
@@ -138,25 +158,32 @@ private fun ExerciseLogCard(viewModel: WorkoutViewModel, exercise: ExerciseInfo)
         }
     }
 
-    Card(shape = RoundedCornerShape(16.dp)) {
+    // FIX: Płaska, obrysowana karta z technicznym wykończeniem zamiast cieniowanej wypukłości
+    OutlinedCard(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(exercise.name, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
+            Text(exercise.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(12.dp))
 
             Row(modifier = Modifier.fillMaxWidth()) {
-                Text("Set", modifier = Modifier.weight(0.6f), style = MaterialTheme.typography.labelSmall)
-                Text("Weight (kg)", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelSmall)
-                Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
-                Text("RIR", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+                Text("Set", modifier = Modifier.weight(0.6f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Weight", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("RIR", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(modifier = Modifier.weight(0.9f))
             }
+
+            Spacer(Modifier.height(8.dp))
 
             sets.forEachIndexed { rowIndex, row ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("${row.setNumber}", modifier = Modifier.weight(0.6f))
+                    Text("${row.setNumber}", modifier = Modifier.weight(0.6f), color = MaterialTheme.colorScheme.onSurface)
 
                     OutlinedTextField(
                         value = row.weight,
@@ -167,7 +194,12 @@ private fun ExerciseLogCard(viewModel: WorkoutViewModel, exercise: ExerciseInfo)
                         enabled = !row.confirmed && !row.submitting,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp)
+                        modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        ),
+                        shape = RoundedCornerShape(8.dp)
                     )
                     OutlinedTextField(
                         value = row.reps,
@@ -178,7 +210,12 @@ private fun ExerciseLogCard(viewModel: WorkoutViewModel, exercise: ExerciseInfo)
                         enabled = !row.confirmed && !row.submitting,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        ),
+                        shape = RoundedCornerShape(8.dp)
                     )
                     OutlinedTextField(
                         value = row.rir,
@@ -189,7 +226,12 @@ private fun ExerciseLogCard(viewModel: WorkoutViewModel, exercise: ExerciseInfo)
                         enabled = !row.confirmed && !row.submitting,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        ),
+                        shape = RoundedCornerShape(8.dp)
                     )
 
                     Row(modifier = Modifier.weight(0.9f), verticalAlignment = Alignment.CenterVertically) {
@@ -208,7 +250,11 @@ private fun ExerciseLogCard(viewModel: WorkoutViewModel, exercise: ExerciseInfo)
                                             return@Checkbox
                                         }
                                         row.error = null
+
+                                        // Optymistyczne logowanie (zakładamy z góry sukces)
+                                        row.confirmed = true
                                         row.submitting = true
+
                                         val rir = row.rir.toIntOrNull() ?: 0
                                         scope.launch {
                                             val success = viewModel.logSet(
@@ -220,12 +266,12 @@ private fun ExerciseLogCard(viewModel: WorkoutViewModel, exercise: ExerciseInfo)
                                             )
                                             row.submitting = false
                                             if (success) {
-                                                row.confirmed = true
                                                 if (sets.last() === row) {
                                                     sets.add(SetRowState(setNumber = row.setNumber + 1))
                                                 }
                                             } else {
-                                                row.error = "Failed to save, try again"
+                                                row.confirmed = false
+                                                row.error = "Failed to save"
                                             }
                                         }
                                     }
@@ -233,7 +279,7 @@ private fun ExerciseLogCard(viewModel: WorkoutViewModel, exercise: ExerciseInfo)
                             )
                             if (!row.confirmed && sets.size > 1) {
                                 IconButton(onClick = { sets.remove(row) }, modifier = Modifier.size(28.dp)) {
-                                    Icon(Icons.Filled.Close, contentDescription = "Cancel set", modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Filled.Close, contentDescription = "Cancel set", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -255,7 +301,7 @@ private fun ExerciseLogCard(viewModel: WorkoutViewModel, exercise: ExerciseInfo)
                     sets.add(SetRowState(setNumber = nextSetNumber))
                 },
                 modifier = Modifier.align(Alignment.End)
-            ) { Text("+ Add set") }
+            ) { Text("+ Add set", color = MaterialTheme.colorScheme.primary) }
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.foss.app.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -11,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -56,13 +58,18 @@ fun DashboardScreen(viewModel: WorkoutViewModel = viewModel()) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun VolumeWidget(
     selectedRange: String,
     onRangeSelected: (String) -> Unit,
     state: UiState<Double>
 ) {
-    Card(shape = RoundedCornerShape(16.dp)) {
+    OutlinedCard( // Wymuszamy OutlinedCard zamiast domyślnego Card
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -79,7 +86,19 @@ private fun VolumeWidget(
                         selected = selectedRange == range.key,
                         onClick = { onRangeSelected(range.key) },
                         label = { Text(range.label) },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color.Transparent,
+                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            selectedContainerColor = MaterialTheme.colorScheme.surfaceVariant, // Zamiast fioletu -> ciemny szary
+                            selectedLabelColor = MaterialTheme.colorScheme.primary // Zamiast fioletu -> nasz akcent
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            borderColor = MaterialTheme.colorScheme.outline,
+                            selectedBorderColor = MaterialTheme.colorScheme.outline,
+                            enabled = true,
+                            selected = selectedRange == range.key
+                        )
                     )
                 }
             }

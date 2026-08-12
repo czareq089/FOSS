@@ -1,5 +1,6 @@
 package com.foss.app.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -125,8 +126,10 @@ private fun ExerciseSelectCard(
     isSubmitting: Boolean,
     onClick: () -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(12.dp),
+    OutlinedCard(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = !isSubmitting, onClick = onClick)

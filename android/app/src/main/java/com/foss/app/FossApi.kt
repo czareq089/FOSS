@@ -11,6 +11,7 @@ import com.foss.app.models.RoutineExercisePreview
 import com.foss.app.models.StartWorkoutRequest
 import com.foss.app.models.StartWorkoutResponse
 import com.foss.app.models.VolumeResponse
+import com.foss.app.models.WorkoutDetailResponse
 import com.foss.app.models.WorkoutSummary
 import retrofit2.Response
 import retrofit2.http.Body
@@ -71,4 +72,7 @@ interface FossApi {
 
     @POST("/api/workouts/exercises/add")
     suspend fun addExerciseToWorkout(@Body request: AddWorkoutExerciseReq): Response<ExerciseInfo>
+
+    @GET("/api/workouts/details")
+    suspend fun getWorkoutDetails(@Query("workout_id") workoutId: Int): Response<WorkoutDetailResponse>
 }

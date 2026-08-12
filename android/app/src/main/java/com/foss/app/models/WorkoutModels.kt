@@ -29,7 +29,7 @@ data class RoutineExercisePreview(
     @SerializedName("name") val name: String,
     @SerializedName("position") val position: Int,
     @SerializedName("default_sets") val defaultSets: Int,
-    @SerializedName("last_sets") val lastSets: List<LastSetValue>
+    @SerializedName("last_sets") val lastSets: List<LastSetValue>?
 )
 
 data class VolumeResponse(
@@ -79,4 +79,27 @@ data class CreateRoutineReq(
 data class AddWorkoutExerciseReq(
     @SerializedName("workout_id") val workoutId: Int,
     @SerializedName("exercise_id") val exerciseId: Int
+)
+
+data class WorkoutDetailSet(
+    @SerializedName("set_id") val setId: Int,
+    @SerializedName("set_number") val setNumber: Int,
+    @SerializedName("weight_kg") val weightKg: Double,
+    @SerializedName("reps") val reps: Int,
+    @SerializedName("rir") val rir: Int
+)
+
+data class WorkoutDetailExercise(
+    @SerializedName("workout_exercise_id") val workoutExerciseId: Int,
+    @SerializedName("exercise_id") val exerciseId: Int,
+    @SerializedName("name") val name: String,
+    @SerializedName("position") val position: Int,
+    @SerializedName("sets") val sets: List<WorkoutDetailSet>
+)
+
+data class WorkoutDetailResponse(
+    @SerializedName("workout_id") val workoutId: Int,
+    @SerializedName("routine_name") val routineName: String,
+    @SerializedName("date") val date: String,
+    @SerializedName("exercises") val exercises: List<WorkoutDetailExercise>
 )
