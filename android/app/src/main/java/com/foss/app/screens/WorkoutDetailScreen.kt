@@ -139,7 +139,6 @@ private fun WorkoutDetailCard(exercise: WorkoutDetailExercise, editMode: Boolean
             }
 
             if (editMode) {
-                // Miejsce na implementację przyszłej edycji zestawów i ćwiczeń
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "Editing historical sets is coming soon.",

@@ -27,10 +27,8 @@ private val TABS = listOf("Routines", "Workouts")
 @Composable
 fun TrainingScreen(
     viewModel: WorkoutViewModel,
-    // FIX 1: Przywrócone parametry dla zakładki rutyn
     onRoutineSelected: (Routine) -> Unit,
     onRoutineEdit: (Routine) -> Unit,
-    // Parametry dla zakładki historii treningów
     onWorkoutSelected: (WorkoutSummary) -> Unit,
     onWorkoutEdit: (WorkoutSummary) -> Unit
 ) {

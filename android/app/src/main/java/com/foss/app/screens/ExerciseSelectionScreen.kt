@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ExerciseSelectionScreen(
     viewModel: WorkoutViewModel,
-    onExerciseSelected: (Int) -> Unit, // Zmiana z routineId na callback akcji
+    onExerciseSelected: (Int) -> Unit,
     onBack: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }

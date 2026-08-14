@@ -65,7 +65,7 @@ private fun VolumeWidget(
     onRangeSelected: (String) -> Unit,
     state: UiState<Double>
 ) {
-    OutlinedCard( // Wymuszamy OutlinedCard zamiast domyślnego Card
+    OutlinedCard(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
@@ -90,8 +90,8 @@ private fun VolumeWidget(
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = Color.Transparent,
                             labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            selectedContainerColor = MaterialTheme.colorScheme.surfaceVariant, // Zamiast fioletu -> ciemny szary
-                            selectedLabelColor = MaterialTheme.colorScheme.primary // Zamiast fioletu -> nasz akcent
+                            selectedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            selectedLabelColor = MaterialTheme.colorScheme.primary
                         ),
                         border = FilterChipDefaults.filterChipBorder(
                             borderColor = MaterialTheme.colorScheme.outline,

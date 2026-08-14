@@ -222,7 +222,7 @@ private fun ReorderableExerciseList(
     var draggedIndex by remember { mutableStateOf<Int?>(null) }
     var targetIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
-    var initialItemOffset by remember { mutableIntStateOf(0) } // FIX: Zmienna kompensująca skoki interfejsu
+    var initialItemOffset by remember { mutableIntStateOf(0) }
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -243,8 +243,6 @@ private fun ReorderableExerciseList(
 
             val zIndex = if (isDragged) 10f else 0f
             val elevation by animateDpAsState(if (isDragged) 16.dp else 0.dp, label = "elevationAnim")
-
-            // FIX: Matematyka kompensacji. Odejmujemy aktualny offset od początkowego.
             val currentOffset = listState.layoutInfo.visibleItemsInfo.find { it.index == index }?.offset ?: 0
             val compensationOffset = if (isDragged) (initialItemOffset - currentOffset).toFloat() else 0f
 
@@ -254,7 +252,6 @@ private fun ReorderableExerciseList(
                     .padding(vertical = 4.dp)
                     .zIndex(zIndex)
             ) {
-                // LINIA WSTAWIANIA NAD KARTĄ
                 if (isTarget && !isMovingDown) {
                     Box(modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.primary))
                     Spacer(Modifier.height(4.dp))
@@ -269,7 +266,6 @@ private fun ReorderableExerciseList(
                         .fillMaxWidth()
                         .graphicsLayer {
                             if (isDragged) {
-                                // FIX: Karta pozostaje w 100% przyklejona do palca mimo drastycznych zmian wysokości listy
                                 translationY = dragOffsetY + compensationOffset
                                 scaleX = 1.02f
                                 scaleY = 1.02f
@@ -286,7 +282,6 @@ private fun ReorderableExerciseList(
                                     tint = if (isDragged) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier
                                         .size(36.dp)
-                                        // FIX: index włączony do klucza uodparnia na błędy śledzenia po zmianie kolejności
                                         .pointerInput(exercise, index) {
                                             detectVerticalDragGestures(
                                                 onDragStart = {
@@ -322,11 +317,9 @@ private fun ReorderableExerciseList(
 
                                                     if (draggedItemInfo != null) {
                                                         val draggedHeight = draggedItemInfo.size
-                                                        // Matematyczny środek przeciąganej karty niezależnie od skurczenia się listy
                                                         val centerOnScreen = initialItemOffset + dragOffsetY + (draggedHeight / 2f)
 
                                                         val target = layoutInfo.visibleItemsInfo.find {
-                                                            // FIX: Sztywny limit chroniący przed najeżdżaniem na przycisk "Add exercise" (poza tablicą)
                                                             it.index < exercises.size &&
                                                                     centerOnScreen > it.offset &&
                                                                     centerOnScreen < it.offset + it.size
@@ -349,7 +342,6 @@ private fun ReorderableExerciseList(
                             }
                         }
 
-                        // Animacja gładkiego chowania zawartości pozostałych kart, budując zwarty blok dla Drag & Drop
                         AnimatedVisibility(
                             visible = !isReordering,
                             enter = expandVertically(),
@@ -434,7 +426,6 @@ private fun ReorderableExerciseList(
                     }
                 }
 
-                // LINIA WSTAWIANIA POD KARTĄ
                 if (isTarget && isMovingDown) {
                     Spacer(Modifier.height(4.dp))
                     Box(modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.primary))

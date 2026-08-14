@@ -24,7 +24,6 @@ class WorkoutViewModel : ViewModel() {
     var routineExercisesState = mutableStateOf<UiState<List<RoutineExercisePreview>>>(UiState.Idle)
         private set
 
-    // FIX: Przechowuje teraz Triple(WorkoutId, RoutineId, ListaCwiczen)
     var workoutState = mutableStateOf<UiState<Triple<Int, Int, List<ExerciseInfo>>>>(UiState.Idle)
         private set
 
@@ -85,8 +84,7 @@ class WorkoutViewModel : ViewModel() {
 
     fun currentWorkoutId(): Int? = (workoutState.value as? UiState.Success)?.data?.first
     fun currentRoutineId(): Int? = (workoutState.value as? UiState.Success)?.data?.second
-
-    // Pozwala na sztywne zaktualizowanie lokalnego stanu po przesunięciach Drag & Drop
+    
     fun setWorkoutExercises(exercises: List<ExerciseInfo>) {
         val currentState = workoutState.value
         if (currentState is UiState.Success) {

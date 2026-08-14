@@ -62,7 +62,7 @@ fun RoutinesScreen(
                         LazyColumn(
                             contentPadding = PaddingValues(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxSize() // Zapewnia płynniejsze działanie LazyColumn
+                            modifier = Modifier.fillMaxSize()
                         ) {
                             items(state.data, key = { it.id }) { routine ->
                                 RoutineCard(
@@ -83,7 +83,7 @@ fun RoutinesScreen(
                     .align(Alignment.BottomEnd)
                     .padding(16.dp),
                 containerColor = MaterialTheme.colorScheme.primary,
-                shape = RoundedCornerShape(12.dp) // Techniczny, lekko zaokrąglony kształt
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "Create routine")
             }
@@ -96,7 +96,6 @@ fun RoutinesScreen(
         content(PaddingValues())
     }
 
-    // Nowoczesny, surowy Dialog do tworzenia rutyny
     if (showCreateDialog) {
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
@@ -118,7 +117,7 @@ fun RoutinesScreen(
                 TextButton(onClick = {
                     if (newRoutineName.isNotBlank()) {
                         val nameToSave = newRoutineName
-                        showCreateDialog = false // Zamykamy od razu dla responsywności
+                        showCreateDialog = false
                         newRoutineName = ""
                         scope.launch {
                             val success = viewModel.createRoutine(nameToSave)
@@ -133,11 +132,10 @@ fun RoutinesScreen(
                 TextButton(onClick = { showCreateDialog = false }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             },
             containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(8.dp) // Wymuszony ostry róg
+            shape = RoundedCornerShape(8.dp)
         )
     }
 
-    // Nowoczesny, surowy Dialog do usuwania
     pendingDelete?.let { routine ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -146,7 +144,7 @@ fun RoutinesScreen(
             confirmButton = {
                 TextButton(onClick = {
                     val routineId = routine.id
-                    pendingDelete = null // Zamykamy od razu dla responsywności
+                    pendingDelete = null
                     scope.launch {
                         val success = viewModel.deleteRoutine(routineId)
                         if (success) viewModel.loadRoutines()
@@ -157,7 +155,7 @@ fun RoutinesScreen(
                 TextButton(onClick = { pendingDelete = null }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             },
             containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(8.dp) // Wymuszony ostry róg
+            shape = RoundedCornerShape(8.dp)
         )
     }
 }
@@ -171,13 +169,12 @@ private fun RoutineCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    // Wymuszamy płaski, obramowany wygląd karty zgodny z webowym dashboardem
     OutlinedCard(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        modifier = Modifier.fillMaxWidth() // Optymalizacja renderowania szerokości
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -195,8 +192,6 @@ private fun RoutineCard(
                 IconButton(onClick = { expanded = true }) {
                     Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-
-                // Modyfikacja DropdownMenu (żeby usunąć ewentualne fiolety z domyślnego tła)
                 MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(surface = MaterialTheme.colorScheme.surfaceVariant)) {
                     DropdownMenu(
                         expanded = expanded,

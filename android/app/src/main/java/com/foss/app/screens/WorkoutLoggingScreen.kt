@@ -343,7 +343,6 @@ fun WorkoutLoggingScreen(
         ModalBottomSheet(onDismissRequest = { activeSetRowForType = null }, sheetState = sheetState, containerColor = MaterialTheme.colorScheme.surface) {
             val row = activeSetRowForType!!
             Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
-                // FIX: Korzystamy z lambdy i 5-parametrowego SetTypeOption!
                 val updateType = { type: String ->
                     row.setType = type
                     activeSetRowForType = null
