@@ -2,6 +2,8 @@ package com.foss.app.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
@@ -43,13 +46,39 @@ fun ExerciseSelectionScreen(
             TopAppBar(
                 title = { Text("Select exercise") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    val backSource = remember { MutableInteractionSource() }
+                    val isBackPressed by backSource.collectIsPressedAsState()
+
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(36.dp)
+                            .alpha(if (isBackPressed) 0.4f else 1f)
+                            .clickable(
+                                interactionSource = backSource,
+                                indication = null
+                            ) { onBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showCreateDialog = true }) {
-                        Icon(Icons.Filled.Add, contentDescription = "Add new exercise to database")
+                    val addSource = remember { MutableInteractionSource() }
+                    val isAddPressed by addSource.collectIsPressedAsState()
+
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 12.dp)
+                            .size(36.dp)
+                            .alpha(if (isAddPressed) 0.4f else 1f)
+                            .clickable(
+                                interactionSource = addSource,
+                                indication = null
+                            ) { showCreateDialog = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add new exercise", tint = MaterialTheme.colorScheme.primary)
                     }
                 }
             )
@@ -166,8 +195,6 @@ private fun CreateExerciseDialog(
     var name by remember { mutableStateOf(initialName) }
     var type by remember { mutableStateOf("Strength") }
     var equipment by remember { mutableStateOf("Barbell") }
-
-    val equipmentOptions = listOf("Barbell", "Dumbbell", "Machine", "Cable", "Bodyweight", "Other")
 
     AlertDialog(
         onDismissRequest = onDismiss,

@@ -2,6 +2,8 @@ package com.foss.app.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,12 +11,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
+import com.foss.app.ui.theme.AccentBlue
 import java.util.Locale
 
 private data class VolumeRange(val key: String, val label: String)
@@ -38,6 +42,9 @@ fun DashboardScreen(
         viewModel.loadDashboardVolume(selectedRange)
     }
 
+    val profileInteractionSource = remember { MutableInteractionSource() }
+    val isProfilePressed by profileInteractionSource.collectIsPressedAsState()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -48,15 +55,20 @@ fun DashboardScreen(
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                         modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(36.dp)
-                            .clickable(onClick = onProfileClick)
+                            .padding(end = 16.dp)
+                            .size(38.dp)
+                            .alpha(if (isProfilePressed) 0.4f else 1f)
+                            .clickable(
+                                interactionSource = profileInteractionSource,
+                                indication = null,
+                                onClick = onProfileClick
+                            )
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
                                 text = "U",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = AccentBlue
                             )
                         }
                     }

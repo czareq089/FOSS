@@ -44,6 +44,7 @@ import com.foss.app.models.ExerciseInfo
 import com.foss.app.models.PlateCalculator
 import com.foss.app.models.ReorderPosition
 import com.foss.app.models.UserAlgorithmSettings
+import com.foss.app.ui.theme.AccentBlue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -129,26 +130,70 @@ fun WorkoutLoggingScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Log workout") },
-                navigationIcon = { IconButton(onClick = { showCancelDialog = true }) { Icon(Icons.Filled.Close, contentDescription = "Cancel") } },
+                navigationIcon = {
+                    val closeSource = remember { MutableInteractionSource() }
+                    val isClosePressed by closeSource.collectIsPressedAsState()
+
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(36.dp)
+                            .alpha(if (isClosePressed) 0.4f else 1f)
+                            .clickable(
+                                interactionSource = closeSource,
+                                indication = null
+                            ) { showCancelDialog = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                },
                 actions = {
                     if (isReordering) {
-                        IconButton(onClick = {
-                            scope.launch {
-                                val wId = viewModel.currentWorkoutId() ?: return@launch
-                                val positions = exercises.mapIndexed { index, ex -> ReorderPosition(exerciseId = ex.exerciseId, position = index + 1) }
-                                viewModel.reorderWorkoutExercises(wId, positions)
-                                viewModel.setWorkoutExercises(exercises.toList())
-                                hasStructureChanged = true
-                                isReordering = false
-                            }
-                        }) {
-                            Icon(Icons.Filled.Check, contentDescription = "Done")
+                        val checkSource = remember { MutableInteractionSource() }
+                        val isCheckPressed by checkSource.collectIsPressedAsState()
+
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .size(36.dp)
+                                .alpha(if (isCheckPressed) 0.4f else 1f)
+                                .clickable(
+                                    interactionSource = checkSource,
+                                    indication = null
+                                ) {
+                                    scope.launch {
+                                        val wId = viewModel.currentWorkoutId() ?: return@launch
+                                        val positions = exercises.mapIndexed { index, ex -> ReorderPosition(exerciseId = ex.exerciseId, position = index + 1) }
+                                        viewModel.reorderWorkoutExercises(wId, positions)
+                                        viewModel.setWorkoutExercises(exercises.toList())
+                                        hasStructureChanged = true
+                                        isReordering = false
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Filled.Check, contentDescription = "Done", tint = AccentBlue)
                         }
                     } else {
                         Box {
-                            IconButton(onClick = { isMenuExpanded = true }) {
-                                Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                            val settingsSource = remember { MutableInteractionSource() }
+                            val isSettingsPressed by settingsSource.collectIsPressedAsState()
+
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .size(36.dp)
+                                    .alpha(if (isSettingsPressed) 0.4f else 1f)
+                                    .clickable(
+                                        interactionSource = settingsSource,
+                                        indication = null
+                                    ) { isMenuExpanded = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+
                             MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(surface = MaterialTheme.colorScheme.surfaceVariant)) {
                                 DropdownMenu(expanded = isMenuExpanded, onDismissRequest = { isMenuExpanded = false }, modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
                                     DropdownMenuItem(
@@ -496,7 +541,6 @@ private fun ExerciseLogContent(
         val lastCount = exercise.lastSets?.size ?: 0
         val totalCount = maxOf(1, maxOf(templateCount, lastCount))
 
-        // Ustalenie wagi bazowej z poprzedniego treningu (lub fallback 0.0)
         val workingSets = exercise.lastSets?.filter { it.setNumber > 0 } ?: emptyList()
         val baselineWeight = if (algoSettings.warmupBase == "heaviest_set") {
             workingSets.maxOfOrNull { it.weightKg } ?: 0.0
@@ -516,7 +560,6 @@ private fun ExerciseLogContent(
             var calcReps = prevSet?.reps ?: 0
             var calcRir = prevSet?.rir ?: 0
 
-            // Logika podpowiedzi
             when (currentType) {
                 "warmup" -> {
                     if (algoSettings.warmupEnabled && baselineWeight > 0.0) {
@@ -655,53 +698,90 @@ private fun ExerciseLogContent(
                     shape = RoundedCornerShape(8.dp)
                 )
 
-                Row(modifier = Modifier.weight(0.9f), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.weight(0.9f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                     if (row.submitting) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     } else {
-                        Checkbox(
-                            checked = row.confirmed,
-                            onCheckedChange = { checked ->
-                                if (checked) {
-                                    if (row.weight.isEmpty() && row.fallbackWeight.isNotEmpty()) row.weight = row.fallbackWeight
-                                    if (row.reps.isEmpty() && row.fallbackReps.isNotEmpty()) row.reps = row.fallbackReps
-                                    if (row.rir.isEmpty() && row.fallbackRir.isNotEmpty()) row.rir = row.fallbackRir
+                        val checkRowSource = remember { MutableInteractionSource() }
+                        val isCheckRowPressed by checkRowSource.collectIsPressedAsState()
 
-                                    val reps = row.reps.toIntOrNull() ?: 0
-                                    val weight = row.weight.toDoubleOrNull() ?: 0.0
-                                    row.error = null
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (row.confirmed) AccentBlue else MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, if (row.confirmed) AccentBlue else MaterialTheme.colorScheme.outline),
+                            modifier = Modifier
+                                .size(28.dp)
+                                .alpha(if (isCheckRowPressed) 0.4f else 1f)
+                                .clickable(
+                                    interactionSource = checkRowSource,
+                                    indication = null
+                                ) {
+                                    if (!row.confirmed) {
+                                        if (row.weight.isEmpty() && row.fallbackWeight.isNotEmpty()) row.weight = row.fallbackWeight
+                                        if (row.reps.isEmpty() && row.fallbackReps.isNotEmpty()) row.reps = row.fallbackReps
+                                        if (row.rir.isEmpty() && row.fallbackRir.isNotEmpty()) row.rir = row.fallbackRir
 
-                                    row.confirmed = true
-                                    row.submitting = true
+                                        val reps = row.reps.toIntOrNull() ?: 0
+                                        val weight = row.weight.toDoubleOrNull() ?: 0.0
+                                        row.error = null
 
-                                    // Sprawdzamy czy kolejna seria to Drop Set – jeśli tak, pomijamy timer odpoczynku
-                                    val nextIndex = rowIndex + 1
-                                    val isNextSetDrop = if (nextIndex < sets.size) {
-                                        sets[nextIndex].setType == "drop"
-                                    } else false
+                                        row.confirmed = true
+                                        row.submitting = true
 
-                                    if (isNextSetDrop) {
-                                        onCancelTimer()
-                                    } else {
-                                        onStartTimer(restSeconds)
-                                    }
+                                        val nextIndex = rowIndex + 1
+                                        val isNextSetDrop = if (nextIndex < sets.size) {
+                                            sets[nextIndex].setType == "drop"
+                                        } else false
 
-                                    val rir = row.rir.toIntOrNull() ?: 0
-                                    scope.launch {
-                                        val success = viewModel.logSet(exercise.workoutExerciseId, row.setNumber, reps, weight, rir, row.setType)
-                                        row.submitting = false
-                                        if (success) {
-                                            if (sets.last() === row) { sets.add(SetRowState(row.setNumber + 1)) }
+                                        if (isNextSetDrop) {
+                                            onCancelTimer()
                                         } else {
-                                            row.confirmed = false
-                                            row.error = "Failed"
+                                            onStartTimer(restSeconds)
                                         }
+
+                                        val rir = row.rir.toIntOrNull() ?: 0
+                                        scope.launch {
+                                            val success = viewModel.logSet(exercise.workoutExerciseId, row.setNumber, reps, weight, rir, row.setType)
+                                            row.submitting = false
+                                            if (success) {
+                                                if (sets.last() === row) { sets.add(SetRowState(row.setNumber + 1)) }
+                                            } else {
+                                                row.confirmed = false
+                                                row.error = "Failed"
+                                            }
+                                        }
+                                    } else {
+                                        row.confirmed = false
                                     }
-                                } else row.confirmed = false
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (row.confirmed) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = "Confirmed",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
-                        )
+                        }
+
                         if (!row.confirmed && sets.size > 1) {
-                            IconButton(onClick = { sets.remove(row) }, modifier = Modifier.size(28.dp)) {
+                            val deleteSource = remember { MutableInteractionSource() }
+                            val isDeletePressed by deleteSource.collectIsPressedAsState()
+
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = 4.dp)
+                                    .size(24.dp)
+                                    .alpha(if (isDeletePressed) 0.4f else 1f)
+                                    .clickable(
+                                        interactionSource = deleteSource,
+                                        indication = null
+                                    ) { sets.remove(row) },
+                                contentAlignment = Alignment.Center
+                            ) {
                                 Icon(Icons.Filled.Close, contentDescription = "Cancel", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }

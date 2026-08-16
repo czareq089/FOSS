@@ -1,6 +1,9 @@
 package com.foss.app.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
@@ -62,29 +66,40 @@ fun AutomationSettingsScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                isSaving = true
-                                val payload = UserAlgorithmSettings(
-                                    warmupEnabled = warmupEnabled,
-                                    warmupBase = warmupBase,
-                                    dropEnabled = dropEnabled,
-                                    dropPercentage = dropPercentage.toDouble(),
-                                    backoffEnabled = backoffEnabled,
-                                    backoffPercentage = backoffPercentage.toDouble()
-                                )
-                                val ok = viewModel.saveAlgorithmSettings(payload)
-                                isSaving = false
-                                if (ok) onBack()
-                            }
-                        },
-                        enabled = !isSaving && state is UiState.Success
+                    val checkSource = remember { MutableInteractionSource() }
+                    val isCheckPressed by checkSource.collectIsPressedAsState()
+
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 12.dp)
+                            .size(36.dp)
+                            .alpha(if (isSaving || isCheckPressed) 0.4f else 1f)
+                            .clickable(
+                                enabled = !isSaving && state is UiState.Success,
+                                interactionSource = checkSource,
+                                indication = null
+                            ) {
+                                scope.launch {
+                                    isSaving = true
+                                    val payload = UserAlgorithmSettings(
+                                        warmupEnabled = warmupEnabled,
+                                        warmupBase = warmupBase,
+                                        dropEnabled = dropEnabled,
+                                        dropPercentage = dropPercentage.toDouble(),
+                                        backoffEnabled = backoffEnabled,
+                                        backoffPercentage = backoffPercentage.toDouble()
+                                    )
+                                    val ok = viewModel.saveAlgorithmSettings(payload)
+                                    isSaving = false
+                                    if (ok) onBack()
+                                }
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         if (isSaving) {
                             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(Icons.Filled.Check, contentDescription = "Save")
+                            Icon(Icons.Filled.Check, contentDescription = "Save", tint = AccentBlue)
                         }
                     }
                 }
@@ -110,7 +125,6 @@ fun AutomationSettingsScreen(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // 1. WARMUP SETS
                         OutlinedCard(
                             shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -160,7 +174,6 @@ fun AutomationSettingsScreen(
                             }
                         }
 
-                        // 2. DROP SETS
                         OutlinedCard(
                             shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -204,8 +217,7 @@ fun AutomationSettingsScreen(
                                 }
                             }
                         }
-
-                        // 3. BACK-OFF SETS
+                        
                         OutlinedCard(
                             shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),

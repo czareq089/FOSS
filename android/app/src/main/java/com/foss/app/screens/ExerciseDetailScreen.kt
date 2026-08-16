@@ -1,8 +1,11 @@
 package com.foss.app.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -11,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -67,8 +71,21 @@ fun ExerciseDetailScreen(
             TopAppBar(
                 title = { Text(title, maxLines = 1) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    val backSource = remember { MutableInteractionSource() }
+                    val isBackPressed by backSource.collectIsPressedAsState()
+
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(36.dp)
+                            .alpha(if (isBackPressed) 0.4f else 1f)
+                            .clickable(
+                                interactionSource = backSource,
+                                indication = null
+                            ) { onBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 }
             )
@@ -247,7 +264,7 @@ private fun AnalyticsContent(
                             .pointerInput(filteredHistory) {
                                 detectDragGestures { change, _ ->
                                     if (filteredHistory.isNotEmpty()) {
-                                        val step = chartWidth.toFloat() / filteredHistory.size
+                                        val step = chartWidth.toFloat() / historySize(filteredHistory)
                                         val index = (change.position.x / step).toInt().coerceIn(0, filteredHistory.size - 1)
                                         selectedPointIndex = index
                                     }
@@ -282,6 +299,8 @@ private fun AnalyticsContent(
         }
     }
 }
+
+private fun historySize(history: List<ExerciseHistoryPoint>): Int = maxOf(1, history.size)
 
 private fun filterHistoryByRange(history: List<ExerciseHistoryPoint>, range: String): List<ExerciseHistoryPoint> {
     if (range == "all" || history.isEmpty()) return history

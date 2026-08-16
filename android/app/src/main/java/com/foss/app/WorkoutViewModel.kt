@@ -350,7 +350,7 @@ class WorkoutViewModel : ViewModel() {
             userPlatesState.value = UiState.Loading
             try {
                 val response = api.getUserPlates(currentUserId)
-                val standardPlates = listOf(0.5, 1.25, 2.5, 5.0, 10.0, 15.0, 20.0)
+                val standardPlates = listOf(0.5, 1.25, 2.5, 5.0, 10.0, 20.0)
                 val loaded = response.body() ?: emptyList()
                 val completeList = standardPlates.map { weight ->
                     loaded.find { it.weightKg == weight } ?: UserPlate(weight, 0)

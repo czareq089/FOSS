@@ -1,6 +1,9 @@
 package com.foss.app.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -16,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -24,6 +28,7 @@ import com.foss.app.WorkoutViewModel
 import com.foss.app.formatUtcToLocal
 import com.foss.app.models.WorkoutDetailExercise
 import com.foss.app.models.WorkoutDetailSet
+import com.foss.app.ui.theme.AccentBlue
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -97,44 +102,56 @@ fun WorkoutDetailScreen(
                 },
                 actions = {
                     if (state is UiState.Success) {
-                        IconButton(
-                            onClick = {
-                                if (editMode) {
-                                    scope.launch {
-                                        isSaving = true
-                                        val payload = editableExercises.mapIndexed { index, ex ->
-                                            WorkoutDetailExercise(
-                                                workoutExerciseId = ex.workoutExerciseId,
-                                                exerciseId = ex.exerciseId,
-                                                name = ex.name,
-                                                position = index + 1,
-                                                sets = ex.sets.mapIndexed { sIndex, s ->
-                                                    WorkoutDetailSet(
-                                                        setId = 0,
-                                                        setNumber = sIndex + 1,
-                                                        weightKg = s.weight.toDoubleOrNull() ?: 0.0,
-                                                        reps = s.reps.toIntOrNull() ?: 0,
-                                                        rir = s.rir.toIntOrNull() ?: 0
-                                                    )
-                                                }
-                                            )
+                        val actionSource = remember { MutableInteractionSource() }
+                        val isActionPressed by actionSource.collectIsPressedAsState()
+
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .size(36.dp)
+                                .alpha(if (isSaving || isActionPressed) 0.4f else 1f)
+                                .clickable(
+                                    enabled = !isSaving,
+                                    interactionSource = actionSource,
+                                    indication = null
+                                ) {
+                                    if (editMode) {
+                                        scope.launch {
+                                            isSaving = true
+                                            val payload = editableExercises.mapIndexed { index, ex ->
+                                                WorkoutDetailExercise(
+                                                    workoutExerciseId = ex.workoutExerciseId,
+                                                    exerciseId = ex.exerciseId,
+                                                    name = ex.name,
+                                                    position = index + 1,
+                                                    sets = ex.sets.mapIndexed { sIndex, s ->
+                                                        WorkoutDetailSet(
+                                                            setId = 0,
+                                                            setNumber = sIndex + 1,
+                                                            weightKg = s.weight.toDoubleOrNull() ?: 0.0,
+                                                            reps = s.reps.toIntOrNull() ?: 0,
+                                                            rir = s.rir.toIntOrNull() ?: 0
+                                                        )
+                                                    }
+                                                )
+                                            }
+                                            val ok = viewModel.updateWorkoutDetails(workoutId, payload)
+                                            isSaving = false
+                                            if (ok) editMode = false
                                         }
-                                        val ok = viewModel.updateWorkoutDetails(workoutId, payload)
-                                        isSaving = false
-                                        if (ok) editMode = false
+                                    } else {
+                                        editMode = true
                                     }
-                                } else {
-                                    editMode = true
-                                }
-                            },
-                            enabled = !isSaving
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             if (isSaving) {
                                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             } else {
                                 Icon(
-                                    if (editMode) Icons.Filled.Check else Icons.Filled.Edit,
-                                    contentDescription = if (editMode) "Save" else "Edit"
+                                    imageVector = if (editMode) Icons.Filled.Check else Icons.Filled.Edit,
+                                    contentDescription = if (editMode) "Save" else "Edit",
+                                    tint = AccentBlue
                                 )
                             }
                         }

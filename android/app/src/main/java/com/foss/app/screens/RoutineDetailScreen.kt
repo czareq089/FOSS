@@ -101,25 +101,57 @@ fun RoutineDetailScreen(
             TopAppBar(
                 title = { Text(routineName) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    val backSource = remember { MutableInteractionSource() }
+                    val isBackPressed by backSource.collectIsPressedAsState()
+
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(36.dp)
+                            .alpha(if (isBackPressed) 0.4f else 1f)
+                            .clickable(
+                                interactionSource = backSource,
+                                indication = null
+                            ) { onBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                    }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        if (editMode) {
-                            scope.launch {
-                                val positions = exercises.mapIndexed { index, ex -> ReorderPosition(exerciseId = ex.exerciseId, position = index + 1) }
-                                viewModel.reorderExercises(routineId, positions)
-                                exercises.forEach { ex ->
-                                    val safeSets = (ex.templateSets ?: listOf(RoutineSet(1, "standard"))).mapIndexed { i, s -> RoutineSet(i + 1, s.setType) }
-                                    viewModel.updateRoutineSets(ex.routineExerciseId, safeSets)
-                                }
-                                viewModel.loadRoutineExercises(routineId)
-                                viewModel.loadRoutineAnalytics(routineId)
-                                editMode = false
-                            }
-                        } else editMode = true
-                    }) {
-                        Icon(if (editMode) Icons.Filled.Check else Icons.Filled.Edit, contentDescription = "Edit/Save")
+                    val actionSource = remember { MutableInteractionSource() }
+                    val isActionPressed by actionSource.collectIsPressedAsState()
+
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 12.dp)
+                            .size(36.dp)
+                            .alpha(if (isActionPressed) 0.4f else 1f)
+                            .clickable(
+                                interactionSource = actionSource,
+                                indication = null
+                            ) {
+                                if (editMode) {
+                                    scope.launch {
+                                        val positions = exercises.mapIndexed { index, ex -> ReorderPosition(exerciseId = ex.exerciseId, position = index + 1) }
+                                        viewModel.reorderExercises(routineId, positions)
+                                        exercises.forEach { ex ->
+                                            val safeSets = (ex.templateSets ?: listOf(RoutineSet(1, "standard"))).mapIndexed { i, s -> RoutineSet(i + 1, s.setType) }
+                                            viewModel.updateRoutineSets(ex.routineExerciseId, safeSets)
+                                        }
+                                        viewModel.loadRoutineExercises(routineId)
+                                        viewModel.loadRoutineAnalytics(routineId)
+                                        editMode = false
+                                    }
+                                } else editMode = true
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (editMode) Icons.Filled.Check else Icons.Filled.Edit,
+                            contentDescription = "Edit/Save",
+                            tint = AccentBlue
+                        )
                     }
                 }
             )
@@ -535,8 +567,21 @@ private fun ReorderableExerciseList(
                                 Spacer(Modifier.width(8.dp))
                                 Text(exercise.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                             }
-                            IconButton(onClick = { scope.launch { if(viewModel.removeExerciseFromRoutine(routineId, exercise.exerciseId)) exercises.removeAt(index) } }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+
+                            val deleteExSource = remember { MutableInteractionSource() }
+                            val isDeleteExPressed by deleteExSource.collectIsPressedAsState()
+
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .alpha(if (isDeleteExPressed) 0.4f else 1f)
+                                    .clickable(
+                                        interactionSource = deleteExSource,
+                                        indication = null
+                                    ) { scope.launch { if(viewModel.removeExerciseFromRoutine(routineId, exercise.exerciseId)) exercises.removeAt(index) } },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                             }
                         }
 
@@ -607,7 +652,19 @@ private fun ReorderableExerciseList(
                                         )
 
                                         Box(modifier = Modifier.weight(0.5f), contentAlignment = Alignment.Center) {
-                                            IconButton(onClick = { if (sIndex in templateList.indices) templateList.removeAt(sIndex) }, modifier = Modifier.size(28.dp)) {
+                                            val removeSetSource = remember { MutableInteractionSource() }
+                                            val isRemoveSetPressed by removeSetSource.collectIsPressedAsState()
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .alpha(if (isRemoveSetPressed) 0.4f else 1f)
+                                                    .clickable(
+                                                        interactionSource = removeSetSource,
+                                                        indication = null
+                                                    ) { if (sIndex in templateList.indices) templateList.removeAt(sIndex) },
+                                                contentAlignment = Alignment.Center
+                                            ) {
                                                 Icon(Icons.Filled.Close, contentDescription = "Remove set", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                                             }
                                         }

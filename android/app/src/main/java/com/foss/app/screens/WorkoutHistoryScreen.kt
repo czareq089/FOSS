@@ -2,6 +2,9 @@ package com.foss.app.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
@@ -126,7 +130,19 @@ private fun WorkoutSummaryCard(
                 )
             }
             Box {
-                IconButton(onClick = { expanded = true }) {
+                val moreSource = remember { MutableInteractionSource() }
+                val isMorePressed by moreSource.collectIsPressedAsState()
+
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .alpha(if (isMorePressed) 0.4f else 1f)
+                        .clickable(
+                            interactionSource = moreSource,
+                            indication = null
+                        ) { expanded = true },
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
