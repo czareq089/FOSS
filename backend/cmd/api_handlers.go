@@ -1105,7 +1105,7 @@ func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 		SELECT 
-			DATE(w.date) as log_date,
+			w.date as log_date,
 			COALESCE(MAX(s.weight_kg), 0) as max_w,
 			COALESCE(MAX(s.weight_kg * (1.0 + (s.reps / 30.0))), 0) as max_1rm,
 			COALESCE(SUM(s.weight_kg * s.reps), 0) as total_vol
@@ -1116,10 +1116,10 @@ func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
 
 	var args []interface{}
 	if interval == "" {
-		query += ` GROUP BY DATE(w.date) ORDER BY DATE(w.date) ASC`
+		query += ` GROUP BY w.id HAVING total_vol > 0 ORDER BY w.date ASC, w.id ASC`
 		args = []interface{}{exerciseID, userID}
 	} else {
-		query += ` AND w.date >= datetime('now', ?) GROUP BY DATE(w.date) ORDER BY DATE(w.date) ASC`
+		query += ` AND w.date >= datetime('now', ?) GROUP BY w.id HAVING total_vol > 0 ORDER BY w.date ASC, w.id ASC`
 		args = []interface{}{exerciseID, userID, interval}
 	}
 
@@ -1162,8 +1162,9 @@ func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	var resp RoutineAnalyticsResponse
-	err = db.QueryRow(`SELECT id, name FROM training_routines WHERE id = ?`, routineID).
-		Scan(&resp.RoutineID, &resp.Name)
+	var createdAt string
+	err = db.QueryRow(`SELECT id, name, DATE(created_at) FROM training_routines WHERE id = ?`, routineID).
+		Scan(&resp.RoutineID, &resp.Name, &createdAt)
 	if err != nil {
 		http.Error(w, "Routine not found", http.StatusNotFound)
 		return
@@ -1194,6 +1195,17 @@ func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&pt.WorkoutID, &pt.Date, &pt.VolumeKg, &pt.TotalReps); err == nil {
 			resp.History = append(resp.History, pt)
 		}
+	}
+
+	// Mock punkt zerowy: jeśli pierwszy trening nie był w dniu utworzenia rutyny, wstawiamy punkt startowy 0 kg
+	if len(resp.History) > 0 && createdAt != "" && resp.History[0].Date > createdAt {
+		zeroPoint := RoutineHistoryPoint{
+			WorkoutID: 0,
+			Date:      createdAt,
+			VolumeKg:  0.0,
+			TotalReps: 0,
+		}
+		resp.History = append([]RoutineHistoryPoint{zeroPoint}, resp.History...)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

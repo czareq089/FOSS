@@ -289,4 +289,36 @@ class WorkoutViewModel : ViewModel() {
             }
         }
     }
+
+    fun resumeWorkout(workoutId: Int) {
+        val current = workoutState.value
+        if (current is UiState.Success && current.data.first == workoutId) return
+
+        viewModelScope.launch {
+            workoutState.value = UiState.Loading
+            try {
+                val response = api.getWorkoutDetails(workoutId)
+                val body = response.body()
+                if (response.isSuccessful && body != null) {
+                    val mappedExercises = body.exercises.map { we ->
+                        ExerciseInfo(
+                            workoutExerciseId = we.workoutExerciseId,
+                            exerciseId = we.exerciseId,
+                            name = we.name,
+                            position = we.position,
+                            templateSets = null,
+                            lastSets = we.sets.map { s ->
+                                LastSetValue(s.setNumber, s.weightKg, s.reps, s.rir)
+                            }
+                        )
+                    }
+                    workoutState.value = UiState.Success(Triple(body.workoutId, 0, mappedExercises))
+                } else {
+                    workoutState.value = UiState.Error("Failed to restore workout")
+                }
+            } catch (e: Exception) {
+                workoutState.value = UiState.Error(e.message ?: "Connection error")
+            }
+        }
+    }
 }

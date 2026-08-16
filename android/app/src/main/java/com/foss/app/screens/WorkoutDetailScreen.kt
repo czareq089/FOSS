@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
+import com.foss.app.formatUtcToLocal
 import com.foss.app.models.WorkoutDetailExercise
 import java.util.Locale
 
@@ -85,7 +86,7 @@ fun WorkoutDetailScreen(
                         ) {
                             item {
                                 Text(
-                                    text = workout.date,
+                                    text = formatUtcToLocal(workout.date),
                                     style = MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(bottom = 8.dp)

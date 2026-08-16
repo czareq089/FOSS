@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
+import com.foss.app.formatUtcToLocal
 import com.foss.app.models.WorkoutSummary
 import kotlinx.coroutines.launch
 
@@ -118,7 +119,11 @@ private fun WorkoutSummaryCard(
         ) {
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(workout.routineName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text(workout.date, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = formatUtcToLocal(workout.date),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Box {
                 IconButton(onClick = { expanded = true }) {

@@ -1,6 +1,8 @@
 package com.foss.app.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -9,19 +11,26 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
 import com.foss.app.models.ExerciseDetailAnalytics
 import com.foss.app.models.ExerciseHistoryPoint
+import com.foss.app.ui.theme.AccentBlue
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLine
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.compose.common.fill
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -29,9 +38,9 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private enum class ChartMetric(val label: String, val unit: String) {
-    ONE_RM("Est. 1RM", "kg"),
     VOLUME("Total Volume", "kg"),
-    MAX_WEIGHT("Max Weight", "kg")
+    MAX_WEIGHT("Max Weight", "kg"),
+    ONE_RM("Est. 1RM", "kg")
 }
 
 private val RANGES = listOf("1m" to "1M", "3m" to "3M", "6m" to "6M", "1y" to "1Y", "all" to "All")
@@ -44,7 +53,7 @@ fun ExerciseDetailScreen(
     onBack: () -> Unit
 ) {
     var selectedRange by remember { mutableStateOf("all") }
-    var selectedMetric by remember { mutableStateOf(ChartMetric.ONE_RM) }
+    var selectedMetric by remember { mutableStateOf(ChartMetric.VOLUME) }
 
     LaunchedEffect(exerciseId) {
         viewModel.loadExerciseAnalytics(exerciseId, "all")
@@ -115,20 +124,30 @@ private fun AnalyticsContent(
         filterHistoryByRange(analytics.history, selectedRange)
     }
 
+    var selectedPointIndex by remember(filteredHistory, selectedMetric) {
+        mutableIntStateOf(if (filteredHistory.isNotEmpty()) filteredHistory.size - 1 else -1)
+    }
+
     LaunchedEffect(filteredHistory, selectedMetric) {
         if (filteredHistory.isNotEmpty()) {
             val rawValues: List<Float> = filteredHistory.map { pt ->
                 when (selectedMetric) {
-                    ChartMetric.ONE_RM -> pt.estOneRM.toFloat()
                     ChartMetric.VOLUME -> pt.volume.toFloat()
                     ChartMetric.MAX_WEIGHT -> pt.maxWeight.toFloat()
+                    ChartMetric.ONE_RM -> pt.estOneRM.toFloat()
                 }
             }
-            val yValues = if (rawValues.size == 1) listOf(rawValues[0], rawValues[0]) else rawValues
+            val baseSeries = if (rawValues.size == 1) listOf(0f, rawValues[0]) else rawValues
+            val maxVal = baseSeries.maxOrNull() ?: 0f
+            val targetCeiling = if (maxVal > 0f) maxVal * 2.0f else 10f
+            val ceilingSeries = List(baseSeries.size) { targetCeiling }
 
             withContext(Dispatchers.Default) {
                 modelProducer.runTransaction {
-                    lineSeries { series(yValues) }
+                    lineSeries {
+                        series(baseSeries)
+                        series(ceilingSeries)
+                    }
                 }
             }
         }
@@ -189,36 +208,75 @@ private fun AnalyticsContent(
                         )
                     }
                 } else {
-                    val latestValue = when (selectedMetric) {
-                        ChartMetric.ONE_RM -> filteredHistory.last().estOneRM
-                        ChartMetric.VOLUME -> filteredHistory.last().volume
-                        ChartMetric.MAX_WEIGHT -> filteredHistory.last().maxWeight
+                    val activePoint = filteredHistory.getOrNull(selectedPointIndex) ?: filteredHistory.last()
+                    val activeValue = when (selectedMetric) {
+                        ChartMetric.VOLUME -> activePoint.volume
+                        ChartMetric.MAX_WEIGHT -> activePoint.maxWeight
+                        ChartMetric.ONE_RM -> activePoint.estOneRM
                     }
 
                     Text(
-                        text = String.format(Locale.US, "%.1f %s", latestValue, selectedMetric.unit),
+                        text = String.format(Locale.US, "%.1f %s", activeValue, selectedMetric.unit),
                         style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = AccentBlue
                     )
                     Text(
-                        text = "Latest recorded value (${filteredHistory.size} sessions)",
+                        text = activePoint.date.take(10),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     Spacer(Modifier.height(16.dp))
 
-                    CartesianChartHost(
-                        chart = rememberCartesianChart(
-                            rememberLineCartesianLayer(),
-                            startAxis = rememberStartAxis(),
-                            bottomAxis = rememberBottomAxis()
-                        ),
-                        modelProducer = modelProducer,
+                    var chartWidth by remember { mutableIntStateOf(1) }
+
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(200.dp)
-                    )
+                            .onSizeChanged { chartWidth = maxOf(1, it.width) }
+                            .pointerInput(filteredHistory) {
+                                detectTapGestures { offset ->
+                                    if (filteredHistory.isNotEmpty()) {
+                                        val step = chartWidth.toFloat() / filteredHistory.size
+                                        val index = (offset.x / step).toInt().coerceIn(0, filteredHistory.size - 1)
+                                        selectedPointIndex = index
+                                    }
+                                }
+                            }
+                            .pointerInput(filteredHistory) {
+                                detectDragGestures { change, _ ->
+                                    if (filteredHistory.isNotEmpty()) {
+                                        val step = chartWidth.toFloat() / filteredHistory.size
+                                        val index = (change.position.x / step).toInt().coerceIn(0, filteredHistory.size - 1)
+                                        selectedPointIndex = index
+                                    }
+                                }
+                            }
+                    ) {
+                        CartesianChartHost(
+                            chart = rememberCartesianChart(
+                                rememberLineCartesianLayer(
+                                    lineProvider = LineCartesianLayer.LineProvider.series(
+                                        rememberLine(
+                                            fill = LineCartesianLayer.LineFill.single(fill(AccentBlue)),
+                                            pointConnector = LineCartesianLayer.PointConnector.cubic(curvature = 0f),
+                                            areaFill = null
+                                        ),
+                                        rememberLine(
+                                            fill = LineCartesianLayer.LineFill.single(fill(Color.Transparent)),
+                                            thickness = 0.dp,
+                                            areaFill = null
+                                        )
+                                    )
+                                ),
+                                startAxis = rememberStartAxis(),
+                                bottomAxis = rememberBottomAxis()
+                            ),
+                            modelProducer = modelProducer,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }
@@ -244,7 +302,7 @@ private fun filterHistoryByRange(history: List<ExerciseHistoryPoint>, range: Str
             val rawDate = it.date.trim().take(10)
             val date = LocalDate.parse(rawDate, formatter)
             !date.isBefore(cutoff)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             true
         }
     }

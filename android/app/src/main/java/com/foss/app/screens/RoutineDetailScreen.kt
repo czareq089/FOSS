@@ -7,6 +7,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -31,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -38,15 +41,18 @@ import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
 import com.foss.app.models.ReorderPosition
 import com.foss.app.models.RoutineExercisePreview
-import com.foss.app.models.RoutineHistoryPoint
 import com.foss.app.models.RoutineSet
+import com.foss.app.ui.theme.AccentBlue
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLine
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.compose.common.fill
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -214,13 +220,24 @@ private fun RoutineVolumeChartCard(state: UiState<com.foss.app.models.RoutineAna
     val modelProducer = remember { CartesianChartModelProducer() }
     val history = (state as? UiState.Success)?.data?.history ?: emptyList()
 
+    var selectedPointIndex by remember(history) {
+        mutableIntStateOf(if (history.isNotEmpty()) history.size - 1 else -1)
+    }
+
     LaunchedEffect(history) {
         if (history.isNotEmpty()) {
             val rawValues: List<Float> = history.map { it.volumeKg.toFloat() }
-            val yValues = if (rawValues.size == 1) listOf(rawValues[0], rawValues[0]) else rawValues
+            val baseSeries = if (rawValues.size == 1) listOf(0f, rawValues[0]) else rawValues
+            val maxVal = baseSeries.maxOrNull() ?: 0f
+            val targetCeiling = if (maxVal > 0f) maxVal * 2.0f else 10f
+            val ceilingSeries = List(baseSeries.size) { targetCeiling }
+
             withContext(Dispatchers.Default) {
                 modelProducer.runTransaction {
-                    lineSeries { series(yValues) }
+                    lineSeries {
+                        series(baseSeries)
+                        series(ceilingSeries)
+                    }
                 }
             }
         }
@@ -238,7 +255,7 @@ private fun RoutineVolumeChartCard(state: UiState<com.foss.app.models.RoutineAna
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(8.dp))
 
             when {
                 state is UiState.Loading -> {
@@ -256,25 +273,69 @@ private fun RoutineVolumeChartCard(state: UiState<com.foss.app.models.RoutineAna
                     }
                 }
                 else -> {
-                    val latest = history.last().volumeKg
+                    val activePoint = history.getOrNull(selectedPointIndex) ?: history.last()
                     Text(
-                        text = String.format(Locale.US, "Latest: %.1f kg (%d sessions logged)", latest, history.size),
+                        text = String.format(Locale.US, "%.1f kg", activePoint.volumeKg),
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = AccentBlue
+                    )
+                    Text(
+                        text = activePoint.date.take(10),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
                     Spacer(Modifier.height(16.dp))
 
-                    CartesianChartHost(
-                        chart = rememberCartesianChart(
-                            rememberLineCartesianLayer(),
-                            startAxis = rememberStartAxis(),
-                            bottomAxis = rememberBottomAxis()
-                        ),
-                        modelProducer = modelProducer,
+                    var chartWidth by remember { mutableIntStateOf(1) }
+
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(150.dp)
-                    )
+                            .onSizeChanged { chartWidth = maxOf(1, it.width) }
+                            .pointerInput(history) {
+                                detectTapGestures { offset ->
+                                    if (history.isNotEmpty()) {
+                                        val step = chartWidth.toFloat() / history.size
+                                        val index = (offset.x / step).toInt().coerceIn(0, history.size - 1)
+                                        selectedPointIndex = index
+                                    }
+                                }
+                            }
+                            .pointerInput(history) {
+                                detectDragGestures { change, _ ->
+                                    if (history.isNotEmpty()) {
+                                        val step = chartWidth.toFloat() / history.size
+                                        val index = (change.position.x / step).toInt().coerceIn(0, history.size - 1)
+                                        selectedPointIndex = index
+                                    }
+                                }
+                            }
+                    ) {
+                        CartesianChartHost(
+                            chart = rememberCartesianChart(
+                                rememberLineCartesianLayer(
+                                    lineProvider = LineCartesianLayer.LineProvider.series(
+                                        rememberLine(
+                                            fill = LineCartesianLayer.LineFill.single(fill(AccentBlue)),
+                                            pointConnector = LineCartesianLayer.PointConnector.cubic(curvature = 0f),
+                                            areaFill = null
+                                        ),
+                                        rememberLine(
+                                            fill = LineCartesianLayer.LineFill.single(fill(Color.Transparent)),
+                                            thickness = 0.dp,
+                                            areaFill = null
+                                        )
+                                    )
+                                ),
+                                startAxis = rememberStartAxis(),
+                                bottomAxis = rememberBottomAxis()
+                            ),
+                            modelProducer = modelProducer,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }

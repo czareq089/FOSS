@@ -65,11 +65,15 @@ class SetRowState(val setNumber: Int) {
 @Composable
 fun WorkoutLoggingScreen(
     viewModel: WorkoutViewModel,
+    workoutId: Int,
     onAddExerciseClick: () -> Unit,
     onExerciseClick: (Int) -> Unit,
     onFinish: () -> Unit,
     onCancelWorkout: () -> Unit
 ) {
+    LaunchedEffect(workoutId) {
+        viewModel.resumeWorkout(workoutId)
+    }
     val state = viewModel.workoutState.value
     var showCancelDialog by remember { mutableStateOf(false) }
     var showSyncDialog by remember { mutableStateOf(false) }

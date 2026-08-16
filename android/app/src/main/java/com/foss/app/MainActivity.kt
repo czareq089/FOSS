@@ -206,6 +206,7 @@ fun FossApp() {
                 val workoutId = entry.arguments?.getInt("workoutId") ?: return@composable
                 WorkoutLoggingScreen(
                     viewModel = viewModel,
+                    workoutId = workoutId,
                     onAddExerciseClick = {
                         navController.navigate("exerciseSelection/workout/$workoutId")
                     },
