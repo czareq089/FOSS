@@ -35,6 +35,11 @@ class WorkoutViewModel : ViewModel() {
         private set
     var workoutDetailsState = mutableStateOf<UiState<WorkoutDetailResponse>>(UiState.Idle)
         private set
+    var userPlatesState = mutableStateOf<UiState<List<UserPlate>>>(UiState.Idle)
+        private set
+
+    var algorithmSettingsState = mutableStateOf<UiState<UserAlgorithmSettings>>(UiState.Idle)
+        private set
 
     fun loadRoutines() {
         viewModelScope.launch {
@@ -334,6 +339,62 @@ class WorkoutViewModel : ViewModel() {
             if (response.isSuccessful) {
                 loadWorkoutDetails(workoutId)
                 loadWorkoutHistory()
+                true
+            } else false
+        } catch (e: Exception) {
+            false
+        }
+    }
+    fun loadUserPlates() {
+        viewModelScope.launch {
+            userPlatesState.value = UiState.Loading
+            try {
+                val response = api.getUserPlates(currentUserId)
+                val standardPlates = listOf(0.5, 1.25, 2.5, 5.0, 10.0, 15.0, 20.0)
+                val loaded = response.body() ?: emptyList()
+                val completeList = standardPlates.map { weight ->
+                    loaded.find { it.weightKg == weight } ?: UserPlate(weight, 0)
+                }
+                userPlatesState.value = UiState.Success(completeList)
+            } catch (e: Exception) {
+                userPlatesState.value = UiState.Error(e.message ?: "Failed to load plates")
+            }
+        }
+    }
+
+    suspend fun saveUserPlates(plates: List<UserPlate>): Boolean {
+        return try {
+            val response = api.updateUserPlates(UpdatePlatesReq(currentUserId, plates))
+            if (response.isSuccessful) {
+                userPlatesState.value = UiState.Success(plates)
+                true
+            } else false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun loadAlgorithmSettings() {
+        viewModelScope.launch {
+            algorithmSettingsState.value = UiState.Loading
+            try {
+                val response = api.getAlgorithmSettings(currentUserId)
+                algorithmSettingsState.value = if (response.isSuccessful && response.body() != null) {
+                    UiState.Success(response.body()!!)
+                } else {
+                    UiState.Success(UserAlgorithmSettings(userId = currentUserId))
+                }
+            } catch (e: Exception) {
+                algorithmSettingsState.value = UiState.Success(UserAlgorithmSettings(userId = currentUserId))
+            }
+        }
+    }
+
+    suspend fun saveAlgorithmSettings(settings: UserAlgorithmSettings): Boolean {
+        return try {
+            val response = api.updateAlgorithmSettings(settings)
+            if (response.isSuccessful) {
+                algorithmSettingsState.value = UiState.Success(settings)
                 true
             } else false
         } catch (e: Exception) {

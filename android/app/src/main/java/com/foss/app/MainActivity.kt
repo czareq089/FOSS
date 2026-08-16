@@ -27,10 +27,13 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.foss.app.navigation.BottomNavItem
 import com.foss.app.navigation.FossBottomNavBar
+import com.foss.app.screens.AutomationSettingsScreen
 import com.foss.app.screens.DashboardScreen
 import com.foss.app.screens.DietScreen
+import com.foss.app.screens.EquipmentScreen
 import com.foss.app.screens.ExerciseDetailScreen
 import com.foss.app.screens.ExerciseSelectionScreen
+import com.foss.app.screens.ProfileSettingsScreen
 import com.foss.app.screens.RoutineDetailScreen
 import com.foss.app.screens.TrainingScreen
 import com.foss.app.screens.WorkoutDetailScreen
@@ -99,7 +102,12 @@ fun FossApp() {
             }
         ) {
             composable(BottomNavItem.Dashboard.route) {
-                DashboardScreen()
+                DashboardScreen(
+                    viewModel = viewModel,
+                    onProfileClick = {
+                        navController.navigate("profileSettings")
+                    }
+                )
             }
 
             composable(BottomNavItem.Training.route) {
@@ -234,6 +242,33 @@ fun FossApp() {
                 ExerciseDetailScreen(
                     viewModel = viewModel,
                     exerciseId = exerciseId,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable("profileSettings") {
+                ProfileSettingsScreen(
+                    viewModel = viewModel,
+                    onNavigateToEquipment = {
+                        navController.navigate("equipment")
+                    },
+                    onNavigateToAutomation = {
+                        navController.navigate("automationSettings")
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable("equipment") {
+                EquipmentScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable("automationSettings") {
+                AutomationSettingsScreen(
+                    viewModel = viewModel,
                     onBack = { navController.popBackStack() }
                 )
             }

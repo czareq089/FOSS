@@ -188,6 +188,26 @@ type UpdateWorkoutDetailsReq struct {
 	Exercises []WorkoutDetailExercise `json:"exercises"`
 }
 
+type UserPlate struct {
+	WeightKg float64 `json:"weight_kg"`
+	Count    int     `json:"count"`
+}
+
+type UpdatePlatesReq struct {
+	UserID int         `json:"user_id"`
+	Plates []UserPlate `json:"plates"`
+}
+
+type UserAlgorithmSettings struct {
+	UserID            int     `json:"user_id"`
+	WarmupEnabled     bool    `json:"warmup_enabled"`
+	WarmupBase        string  `json:"warmup_base"`
+	DropEnabled       bool    `json:"drop_enabled"`
+	DropPercentage    float64 `json:"drop_percentage"`
+	BackoffEnabled    bool    `json:"backoff_enabled"`
+	BackoffPercentage float64 `json:"backoff_percentage"`
+}
+
 // ==========================================
 // FUNKCJE OBSŁUGI API
 // ==========================================
@@ -1286,4 +1306,132 @@ func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleAPIUserPlates(w http.ResponseWriter, r *http.Request) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+
+	if r.Method == http.MethodGet {
+		rows, err := db.Query(`SELECT weight_kg, count FROM user_plates WHERE user_id = ? ORDER BY weight_kg ASC`, userID)
+		if err != nil {
+			http.Error(w, "Database query error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var plates []UserPlate
+		for rows.Next() {
+			var p UserPlate
+			if err := rows.Scan(&p.WeightKg, &p.Count); err == nil {
+				plates = append(plates, p)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(plates)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req UpdatePlatesReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid body", http.StatusBadRequest)
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		_, _ = tx.Exec(`DELETE FROM user_plates WHERE user_id = ?`, req.UserID)
+		for _, p := range req.Plates {
+			if p.Count > 0 {
+				_, _ = tx.Exec(`INSERT INTO user_plates (user_id, weight_kg, count) VALUES (?, ?, ?)`, req.UserID, p.WeightKg, p.Count)
+			}
+		}
+		tx.Commit()
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func handleAPIUserAlgorithms(w http.ResponseWriter, r *http.Request) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+
+	if r.Method == http.MethodGet {
+		var s UserAlgorithmSettings
+		s.UserID = 1
+		s.WarmupEnabled = true
+		s.WarmupBase = "first_working_set"
+		s.DropEnabled = true
+		s.DropPercentage = 20.0
+		s.BackoffEnabled = true
+		s.BackoffPercentage = 10.0
+
+		err := db.QueryRow(`
+			SELECT warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage 
+			FROM user_algorithm_settings WHERE user_id = ?`, userID).
+			Scan(&s.WarmupEnabled, &s.WarmupBase, &s.DropEnabled, &s.DropPercentage, &s.BackoffEnabled, &s.BackoffPercentage)
+
+		if err != nil && err != sql.ErrNoRows {
+			http.Error(w, "Database query error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(s)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var s UserAlgorithmSettings
+		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+			http.Error(w, "Invalid body", http.StatusBadRequest)
+			return
+		}
+
+		_, err := db.Exec(`
+			INSERT INTO user_algorithm_settings (user_id, warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(user_id) DO UPDATE SET
+				warmup_enabled = excluded.warmup_enabled,
+				warmup_base = excluded.warmup_base,
+				drop_enabled = excluded.drop_enabled,
+				drop_percentage = excluded.drop_percentage,
+				backoff_enabled = excluded.backoff_enabled,
+				backoff_percentage = excluded.backoff_percentage`,
+			s.UserID, s.WarmupEnabled, s.WarmupBase, s.DropEnabled, s.DropPercentage, s.BackoffEnabled, s.BackoffPercentage)
+
+		if err != nil {
+			http.Error(w, "Database save error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }

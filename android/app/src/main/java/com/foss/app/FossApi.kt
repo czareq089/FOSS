@@ -91,4 +91,16 @@ interface FossApi {
 
     @POST("/api/workouts/update")
     suspend fun updateWorkoutDetails(@Body request: UpdateWorkoutDetailsReq): Response<Unit>
+
+    @GET("/api/user/plates")
+    suspend fun getUserPlates(@Query("user_id") userId: Int = 1): Response<List<UserPlate>>
+
+    @POST("/api/user/plates")
+    suspend fun updateUserPlates(@Body request: UpdatePlatesReq): Response<Unit>
+
+    @GET("/api/user/algorithms")
+    suspend fun getAlgorithmSettings(@Query("user_id") userId: Int = 1): Response<UserAlgorithmSettings>
+
+    @POST("/api/user/algorithms")
+    suspend fun updateAlgorithmSettings(@Body settings: UserAlgorithmSettings): Response<Unit>
 }

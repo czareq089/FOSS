@@ -41,7 +41,9 @@ import androidx.compose.ui.zIndex
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
 import com.foss.app.models.ExerciseInfo
+import com.foss.app.models.PlateCalculator
 import com.foss.app.models.ReorderPosition
+import com.foss.app.models.UserAlgorithmSettings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -73,6 +75,8 @@ fun WorkoutLoggingScreen(
 ) {
     LaunchedEffect(workoutId) {
         viewModel.resumeWorkout(workoutId)
+        viewModel.loadUserPlates()
+        viewModel.loadAlgorithmSettings()
     }
     val state = viewModel.workoutState.value
     var showCancelDialog by remember { mutableStateOf(false) }
@@ -245,10 +249,11 @@ fun WorkoutLoggingScreen(
                                                             },
                                                             onDragEnd = {
                                                                 if (draggedIndex != null && targetIndex != null && draggedIndex != targetIndex) {
-                                                                    val from = draggedIndex!!
-                                                                    val safeTo = targetIndex!!.coerceIn(0, exercises.size - 1)
+                                                                    val from = draggedIndex!!.coerceIn(0, exercises.size - 1)
+                                                                    val to = targetIndex!!.coerceIn(0, exercises.size - 1)
                                                                     val moved = exercises.removeAt(from)
-                                                                    exercises.add(safeTo, moved)
+                                                                    val safeInsert = to.coerceIn(0, exercises.size)
+                                                                    exercises.add(safeInsert, moved)
                                                                 }
                                                                 draggedIndex = null
                                                                 targetIndex = null
@@ -316,6 +321,7 @@ fun WorkoutLoggingScreen(
                                             restSeconds = currentRestTime,
                                             onRestTimeClick = { activeExerciseForTimer = exercise },
                                             onStartTimer = { seconds -> timerTotal = seconds; timerRemaining = seconds; isTimerRunning = true },
+                                            onCancelTimer = { timerTotal = 0; timerRemaining = 0; isTimerRunning = false },
                                             onOpenSetType = { row -> activeSetRowForType = row }
                                         )
                                     }
@@ -476,9 +482,13 @@ private fun ExerciseLogContent(
     restSeconds: Int,
     onRestTimeClick: () -> Unit,
     onStartTimer: (Int) -> Unit,
+    onCancelTimer: () -> Unit,
     onOpenSetType: (SetRowState) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+
+    val userPlates = (viewModel.userPlatesState.value as? UiState.Success)?.data ?: emptyList()
+    val algoSettings = (viewModel.algorithmSettingsState.value as? UiState.Success)?.data ?: UserAlgorithmSettings()
 
     val sets = remember(exercise.workoutExerciseId) {
         val initialList = mutableStateListOf<SetRowState>()
@@ -486,16 +496,68 @@ private fun ExerciseLogContent(
         val lastCount = exercise.lastSets?.size ?: 0
         val totalCount = maxOf(1, maxOf(templateCount, lastCount))
 
+        // Ustalenie wagi bazowej z poprzedniego treningu (lub fallback 0.0)
+        val workingSets = exercise.lastSets?.filter { it.setNumber > 0 } ?: emptyList()
+        val baselineWeight = if (algoSettings.warmupBase == "heaviest_set") {
+            workingSets.maxOfOrNull { it.weightKg } ?: 0.0
+        } else {
+            workingSets.firstOrNull()?.weightKg ?: 0.0
+        }
+
+        val warmupTemplates = exercise.templateSets?.filter { it.setType == "warmup" } ?: emptyList()
+        val totalWarmups = warmupTemplates.size
+
         for (i in 1..totalCount) {
             val template = exercise.templateSets?.find { it.setNumber == i }
             val prevSet = exercise.lastSets?.find { it.setNumber == i }
+            val currentType = template?.setType ?: "standard"
+
+            var calcWeight = prevSet?.weightKg ?: 0.0
+            var calcReps = prevSet?.reps ?: 0
+            var calcRir = prevSet?.rir ?: 0
+
+            // Logika podpowiedzi
+            when (currentType) {
+                "warmup" -> {
+                    if (algoSettings.warmupEnabled && baselineWeight > 0.0) {
+                        val warmupIndex = warmupTemplates.indexOf(template) + 1
+                        val fraction = if (totalWarmups <= 1) {
+                            0.60
+                        } else {
+                            0.50 + (0.35 * ((warmupIndex - 1).toDouble() / maxOf(1, totalWarmups - 1)))
+                        }
+                        val targetRaw = baselineWeight * fraction
+                        calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
+                        calcReps = if (totalWarmups <= 1) 5 else maxOf(1, 6 - (warmupIndex * 2) + 1)
+                        calcRir = 5
+                    }
+                }
+                "drop" -> {
+                    if (algoSettings.dropEnabled && baselineWeight > 0.0) {
+                        val targetRaw = baselineWeight * (1.0 - (algoSettings.dropPercentage / 100.0))
+                        calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
+                        calcRir = 0
+                    }
+                }
+                "back_off" -> {
+                    if (algoSettings.backoffEnabled && baselineWeight > 0.0) {
+                        val targetRaw = baselineWeight * (1.0 - (algoSettings.backoffPercentage / 100.0))
+                        calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
+                        calcRir = 1
+                    }
+                }
+            }
 
             initialList.add(SetRowState(i).apply {
-                this.setType = template?.setType ?: "standard"
-                if (prevSet != null) {
-                    this.fallbackWeight = if (prevSet.weightKg % 1.0 == 0.0) prevSet.weightKg.toInt().toString() else prevSet.weightKg.toString()
-                    this.fallbackReps = prevSet.reps.toString()
-                    this.fallbackRir = prevSet.rir.toString()
+                this.setType = currentType
+                if (calcWeight > 0.0) {
+                    this.fallbackWeight = if (calcWeight % 1.0 == 0.0) calcWeight.toInt().toString() else calcWeight.toString()
+                }
+                if (calcReps > 0) {
+                    this.fallbackReps = calcReps.toString()
+                }
+                if (calcRir >= 0 && (prevSet != null || currentType != "standard")) {
+                    this.fallbackRir = calcRir.toString()
                 }
             })
         }
@@ -611,7 +673,18 @@ private fun ExerciseLogContent(
 
                                     row.confirmed = true
                                     row.submitting = true
-                                    onStartTimer(restSeconds)
+
+                                    // Sprawdzamy czy kolejna seria to Drop Set – jeśli tak, pomijamy timer odpoczynku
+                                    val nextIndex = rowIndex + 1
+                                    val isNextSetDrop = if (nextIndex < sets.size) {
+                                        sets[nextIndex].setType == "drop"
+                                    } else false
+
+                                    if (isNextSetDrop) {
+                                        onCancelTimer()
+                                    } else {
+                                        onStartTimer(restSeconds)
+                                    }
 
                                     val rir = row.rir.toIntOrNull() ?: 0
                                     scope.launch {
