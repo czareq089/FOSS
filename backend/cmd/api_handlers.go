@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -43,7 +44,7 @@ type StartWorkoutRequest struct {
 
 type StartWorkoutResponse struct {
 	WorkoutID int            `json:"workout_id"`
-	RoutineID int            `json:"routine_id"` // FIX: Zwracamy RoutineID dla późniejszej synchronizacji
+	RoutineID int            `json:"routine_id"`
 	Exercises []ExerciseInfo `json:"exercises"`
 }
 
@@ -79,13 +80,11 @@ type ReorderRequest struct {
 	Positions []ReorderPosition `json:"positions"`
 }
 
-// NOWE: Żądanie zmiany kolejności w aktywnym treningu
 type WorkoutReorderRequest struct {
 	WorkoutID int               `json:"workout_id"`
 	Positions []ReorderPosition `json:"positions"`
 }
 
-// NOWE: Żądanie synchronizacji rutyny na podstawie zakończonego treningu
 type SyncRoutineReq struct {
 	RoutineID int `json:"routine_id"`
 	WorkoutID int `json:"workout_id"`
@@ -97,6 +96,12 @@ type VolumeResponse struct {
 
 type ExerciseItem struct {
 	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Equipment string `json:"equipment"`
+}
+
+type CreateExerciseReq struct {
 	Name      string `json:"name"`
 	Type      string `json:"type"`
 	Equipment string `json:"equipment"`
@@ -714,6 +719,49 @@ func handleAPIExercisesList(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(exercises)
 }
 
+func handleAPIExerciseCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req CreateExerciseReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "Exercise name cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	res, err := db.Exec(`INSERT INTO training_exercises (name, type, equipment) VALUES (?, ?, ?)`,
+		strings.TrimSpace(req.Name), strings.TrimSpace(req.Type), strings.TrimSpace(req.Equipment))
+	if err != nil {
+		http.Error(w, "Exercise already exists or database error", http.StatusConflict)
+		return
+	}
+
+	newID, _ := res.LastInsertId()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(ExerciseItem{
+		ID:        int(newID),
+		Name:      req.Name,
+		Type:      req.Type,
+		Equipment: req.Equipment,
+	})
+}
+
 func handleAPIRoutineExerciseAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -928,7 +976,6 @@ func handleAPIUpdateRoutineSets(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// NOWE: Funkcja synchronizująca Rutynę z Zakończonego Treningu
 func handleAPISyncRoutineFromWorkout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -944,10 +991,8 @@ func handleAPISyncRoutineFromWorkout(w http.ResponseWriter, r *http.Request) {
 
 	tx, _ := db.Begin()
 
-	// 1. Czyścimy starą rutynę (ćwiczenia + sety kaskadowo)
 	tx.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ?`, req.RoutineID)
 
-	// 2. Pobieramy ćwiczenia z odbytego treningu zachowując nową kolejność
 	rows, _ := tx.Query(`SELECT id, exercise_id, position FROM training_workout_exercises WHERE workout_id = ? ORDER BY position`, req.WorkoutID)
 	type wEx struct {
 		id   int
@@ -962,7 +1007,6 @@ func handleAPISyncRoutineFromWorkout(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	// 3. Wrzucamy do rutyny jako szablony
 	for _, we := range wExercises {
 		res, _ := tx.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`, req.RoutineID, we.exID, we.pos)
 		newReID, _ := res.LastInsertId()

@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,6 +30,7 @@ fun ExerciseSelectionScreen(
     var searchQuery by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     var submittingId by remember { mutableStateOf<Int?>(null) }
+    var showCreateDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.loadAllExercises()
@@ -44,6 +46,11 @@ fun ExerciseSelectionScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                },
+                actions = {
+                    IconButton(onClick = { showCreateDialog = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add new exercise to database")
+                    }
                 }
             )
         }
@@ -54,14 +61,20 @@ fun ExerciseSelectionScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
+            Spacer(Modifier.height(8.dp))
+
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search") },
+                placeholder = { Text("Search exercise...") },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(8.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                )
             )
 
             Spacer(Modifier.height(16.dp))
@@ -89,15 +102,23 @@ fun ExerciseSelectionScreen(
                         }
 
                         if (filtered.isEmpty()) {
-                            Text(
-                                "No exercises found",
+                            Column(
                                 modifier = Modifier.align(Alignment.Center),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    "No exercises found",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                TextButton(onClick = { showCreateDialog = true }) {
+                                    Text("Create '${searchQuery.trim()}'", color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
                         } else {
                             LazyColumn(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                                contentPadding = PaddingValues(bottom = 16.dp)
+                                contentPadding = PaddingValues(bottom = 24.dp)
                             ) {
                                 items(filtered, key = { it.id }) { exercise ->
                                     ExerciseSelectCard(
@@ -118,6 +139,91 @@ fun ExerciseSelectionScreen(
             }
         }
     }
+
+    if (showCreateDialog) {
+        CreateExerciseDialog(
+            initialName = searchQuery,
+            onDismiss = { showCreateDialog = false },
+            onCreate = { name, type, equipment ->
+                scope.launch {
+                    val created = viewModel.createExercise(name, type, equipment)
+                    showCreateDialog = false
+                    if (created != null) {
+                        onExerciseSelected(created.id)
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun CreateExerciseDialog(
+    initialName: String,
+    onDismiss: () -> Unit,
+    onCreate: (name: String, type: String, equipment: String) -> Unit
+) {
+    var name by remember { mutableStateOf(initialName) }
+    var type by remember { mutableStateOf("Strength") }
+    var equipment by remember { mutableStateOf("Barbell") }
+
+    val equipmentOptions = listOf("Barbell", "Dumbbell", "Machine", "Cable", "Bodyweight", "Other")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Custom Exercise", color = MaterialTheme.colorScheme.onSurface) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Exercise name") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = type,
+                    onValueChange = { type = it },
+                    label = { Text("Category / Type") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = equipment,
+                    onValueChange = { equipment = it },
+                    label = { Text("Equipment (e.g. Barbell, Machine)") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onCreate(name.trim(), type.trim(), equipment.trim())
+                    }
+                }
+            ) {
+                Text("Save & Add", color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp)
+    )
 }
 
 @Composable

@@ -23,7 +23,7 @@ data class StartWorkoutRequest(
 
 data class StartWorkoutResponse(
     @SerializedName("workout_id") val workoutId: Int,
-    @SerializedName("routine_id") val routineId: Int, // FIX: Pozwala apce wiedzieć, z kim się synchronizować
+    @SerializedName("routine_id") val routineId: Int,
     @SerializedName("exercises") val exercises: List<ExerciseInfo>
 )
 
@@ -88,6 +88,12 @@ data class SyncRoutineReq(
 
 data class ExerciseItem(
     @SerializedName("id") val id: Int,
+    @SerializedName("name") val name: String,
+    @SerializedName("type") val type: String,
+    @SerializedName("equipment") val equipment: String
+)
+
+data class CreateExerciseReq(
     @SerializedName("name") val name: String,
     @SerializedName("type") val type: String,
     @SerializedName("equipment") val equipment: String

@@ -49,6 +49,9 @@ interface FossApi {
     @GET("/api/exercises")
     suspend fun getAllExercises(): Response<List<ExerciseItem>>
 
+    @POST("/api/exercises/create")
+    suspend fun createExercise(@Body request: CreateExerciseReq): Response<ExerciseItem>
+
     @POST("/api/routines/exercises/add")
     suspend fun addExerciseToRoutine(@Body request: AddRoutineExerciseReq): Response<Unit>
 
@@ -68,7 +71,7 @@ interface FossApi {
     suspend fun getWorkoutDetails(@Query("workout_id") workoutId: Int): Response<WorkoutDetailResponse>
 
     @POST("/api/routines/exercises/sets/update")
-    suspend fun updateRoutineSets(@Body request: UpdateRoutineSetsReq): retrofit2.Response<Unit>
+    suspend fun updateRoutineSets(@Body request: UpdateRoutineSetsReq): Response<Unit>
 
     @POST("/api/routines/sync")
     suspend fun syncRoutineFromWorkout(@Body request: SyncRoutineReq): Response<Unit>

@@ -84,7 +84,7 @@ class WorkoutViewModel : ViewModel() {
 
     fun currentWorkoutId(): Int? = (workoutState.value as? UiState.Success)?.data?.first
     fun currentRoutineId(): Int? = (workoutState.value as? UiState.Success)?.data?.second
-    
+
     fun setWorkoutExercises(exercises: List<ExerciseInfo>) {
         val currentState = workoutState.value
         if (currentState is UiState.Success) {
@@ -181,6 +181,18 @@ class WorkoutViewModel : ViewModel() {
             } catch (e: Exception) {
                 exercisesListState.value = UiState.Error(e.message ?: "Unknown connection error")
             }
+        }
+    }
+
+    suspend fun createExercise(name: String, type: String, equipment: String): ExerciseItem? {
+        return try {
+            val response = api.createExercise(CreateExerciseReq(name, type, equipment))
+            if (response.isSuccessful && response.body() != null) {
+                loadAllExercises()
+                response.body()
+            } else null
+        } catch (e: Exception) {
+            null
         }
     }
 
