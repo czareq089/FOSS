@@ -82,4 +82,10 @@ interface FossApi {
         @Query("range") range: String = "all",
         @Query("user_id") userId: Int = 1
     ): Response<ExerciseDetailAnalytics>
+
+    @GET("/api/routines/analytics")
+    suspend fun getRoutineAnalytics(
+        @Query("routine_id") routineId: Int,
+        @Query("user_id") userId: Int = 1
+    ): Response<RoutineAnalyticsResponse>
 }

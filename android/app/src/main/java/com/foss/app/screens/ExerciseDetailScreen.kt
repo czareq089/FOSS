@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.sp
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
 import com.foss.app.models.ExerciseDetailAnalytics
+import com.foss.app.models.ExerciseHistoryPoint
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
@@ -21,6 +22,10 @@ import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLa
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private enum class ChartMetric(val label: String, val unit: String) {
@@ -41,8 +46,8 @@ fun ExerciseDetailScreen(
     var selectedRange by remember { mutableStateOf("all") }
     var selectedMetric by remember { mutableStateOf(ChartMetric.ONE_RM) }
 
-    LaunchedEffect(exerciseId, selectedRange) {
-        viewModel.loadExerciseAnalytics(exerciseId, selectedRange)
+    LaunchedEffect(exerciseId) {
+        viewModel.loadExerciseAnalytics(exerciseId, "all")
     }
 
     val state = viewModel.exerciseAnalyticsState.value
@@ -70,11 +75,16 @@ fun ExerciseDetailScreen(
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
                 is UiState.Error -> {
-                    Text(
-                        state.message,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
+                    Column(
+                        modifier = Modifier.align(Alignment.Center).padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(state.message, color = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = { viewModel.loadExerciseAnalytics(exerciseId, "all") }) {
+                            Text("Retry")
+                        }
+                    }
                 }
                 is UiState.Success -> {
                     AnalyticsContent(
@@ -100,19 +110,26 @@ private fun AnalyticsContent(
     onRangeSelect: (String) -> Unit
 ) {
     val modelProducer = remember { CartesianChartModelProducer() }
-    val history = analytics.history
 
-    LaunchedEffect(history, selectedMetric) {
-        if (history.isNotEmpty()) {
-            val yValues = history.map { pt ->
+    val filteredHistory = remember(analytics.history, selectedRange) {
+        filterHistoryByRange(analytics.history, selectedRange)
+    }
+
+    LaunchedEffect(filteredHistory, selectedMetric) {
+        if (filteredHistory.isNotEmpty()) {
+            val rawValues: List<Float> = filteredHistory.map { pt ->
                 when (selectedMetric) {
-                    ChartMetric.ONE_RM -> pt.estOneRM
-                    ChartMetric.VOLUME -> pt.volume
-                    ChartMetric.MAX_WEIGHT -> pt.maxWeight
+                    ChartMetric.ONE_RM -> pt.estOneRM.toFloat()
+                    ChartMetric.VOLUME -> pt.volume.toFloat()
+                    ChartMetric.MAX_WEIGHT -> pt.maxWeight.toFloat()
                 }
             }
-            modelProducer.runTransaction {
-                lineSeries { series(yValues) }
+            val yValues = if (rawValues.size == 1) listOf(rawValues[0], rawValues[0]) else rawValues
+
+            withContext(Dispatchers.Default) {
+                modelProducer.runTransaction {
+                    lineSeries { series(yValues) }
+                }
             }
         }
     }
@@ -158,24 +175,24 @@ private fun AnalyticsContent(
 
                 Spacer(Modifier.height(16.dp))
 
-                if (history.isEmpty()) {
+                if (filteredHistory.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(220.dp),
+                            .height(200.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            "No logged workouts for this range",
+                            "No logged workouts found",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 } else {
                     val latestValue = when (selectedMetric) {
-                        ChartMetric.ONE_RM -> history.last().estOneRM
-                        ChartMetric.VOLUME -> history.last().volume
-                        ChartMetric.MAX_WEIGHT -> history.last().maxWeight
+                        ChartMetric.ONE_RM -> filteredHistory.last().estOneRM
+                        ChartMetric.VOLUME -> filteredHistory.last().volume
+                        ChartMetric.MAX_WEIGHT -> filteredHistory.last().maxWeight
                     }
 
                     Text(
@@ -184,7 +201,7 @@ private fun AnalyticsContent(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Latest recorded value",
+                        text = "Latest recorded value (${filteredHistory.size} sessions)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -204,6 +221,31 @@ private fun AnalyticsContent(
                     )
                 }
             }
+        }
+    }
+}
+
+private fun filterHistoryByRange(history: List<ExerciseHistoryPoint>, range: String): List<ExerciseHistoryPoint> {
+    if (range == "all" || history.isEmpty()) return history
+    val now = LocalDate.now()
+
+    val cutoff = when (range) {
+        "1m" -> now.minusMonths(1)
+        "3m" -> now.minusMonths(3)
+        "6m" -> now.minusMonths(6)
+        "1y" -> now.minusYears(1)
+        else -> null
+    } ?: return history
+
+    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+
+    return history.filter {
+        try {
+            val rawDate = it.date.trim().take(10)
+            val date = LocalDate.parse(rawDate, formatter)
+            !date.isBefore(cutoff)
+        } catch (e: Exception) {
+            true
         }
     }
 }

@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -39,8 +38,19 @@ import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
 import com.foss.app.models.ReorderPosition
 import com.foss.app.models.RoutineExercisePreview
+import com.foss.app.models.RoutineHistoryPoint
 import com.foss.app.models.RoutineSet
+import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
+import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,9 +66,11 @@ fun RoutineDetailScreen(
     LaunchedEffect(routineId) {
         viewModel.resetWorkoutState()
         viewModel.loadRoutineExercises(routineId)
+        viewModel.loadRoutineAnalytics(routineId)
     }
 
     val previewState = viewModel.routineExercisesState.value
+    val analyticsState = viewModel.routineAnalyticsState.value
     val startState = viewModel.workoutState.value
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState()
@@ -100,6 +112,7 @@ fun RoutineDetailScreen(
                                     viewModel.updateRoutineSets(ex.routineExerciseId, safeSets)
                                 }
                                 viewModel.loadRoutineExercises(routineId)
+                                viewModel.loadRoutineAnalytics(routineId)
                                 editMode = false
                             }
                         } else editMode = true
@@ -141,7 +154,23 @@ fun RoutineDetailScreen(
                             onOpenSetType = { ex, index -> activeSetForType = Pair(ex, index) }
                         )
                     } else {
-                        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        LazyColumn(
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            item {
+                                RoutineVolumeChartCard(analyticsState)
+                            }
+
+                            item {
+                                Text(
+                                    text = "Exercises",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                                )
+                            }
+
                             itemsIndexed(
                                 items = exercises,
                                 key = { _, ex -> ex.exerciseId }
@@ -174,6 +203,78 @@ fun RoutineDetailScreen(
                     SetTypeOption("failure", "Failure set", "F", Color(0xFFEF4444)) { updateType("failure") }
                     SetTypeOption("drop", "Drop set", "D", Color(0xFF3B82F6)) { updateType("drop") }
                     SetTypeOption("back_off", "Back-off set", "B", Color(0xFF34D399)) { updateType("back_off") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoutineVolumeChartCard(state: UiState<com.foss.app.models.RoutineAnalyticsResponse>) {
+    val modelProducer = remember { CartesianChartModelProducer() }
+    val history = (state as? UiState.Success)?.data?.history ?: emptyList()
+
+    LaunchedEffect(history) {
+        if (history.isNotEmpty()) {
+            val rawValues: List<Float> = history.map { it.volumeKg.toFloat() }
+            val yValues = if (rawValues.size == 1) listOf(rawValues[0], rawValues[0]) else rawValues
+            withContext(Dispatchers.Default) {
+                modelProducer.runTransaction {
+                    lineSeries { series(yValues) }
+                }
+            }
+        }
+    }
+
+    OutlinedCard(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Volume Trend (Total kg)",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.height(4.dp))
+
+            when {
+                state is UiState.Loading -> {
+                    Box(modifier = Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    }
+                }
+                history.isEmpty() -> {
+                    Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "No logged workouts for this routine yet",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                else -> {
+                    val latest = history.last().volumeKg
+                    Text(
+                        text = String.format(Locale.US, "Latest: %.1f kg (%d sessions logged)", latest, history.size),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(16.dp))
+
+                    CartesianChartHost(
+                        chart = rememberCartesianChart(
+                            rememberLineCartesianLayer(),
+                            startAxis = rememberStartAxis(),
+                            bottomAxis = rememberBottomAxis()
+                        ),
+                        modelProducer = modelProducer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp)
+                    )
                 }
             }
         }
@@ -218,16 +319,19 @@ private fun ExercisePreviewCard(
                     .alpha(if (isTitlePressed) 0.4f else 1f)
             )
 
-            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                exercise.mutableTemplateSets.forEach { set ->
-                    val typeColor = when(set.setType) {
-                        "warmup" -> Color(0xFFFFC107)
-                        "failure" -> Color(0xFFEF4444)
-                        "back_off" -> Color(0xFF34D399)
-                        "drop" -> Color(0xFF3B82F6)
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+            val displaySets = exercise.mutableTemplateSets
+            if (displaySets.isNotEmpty()) {
+                Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    displaySets.forEach { set ->
+                        val typeColor = when(set.setType) {
+                            "warmup" -> Color(0xFFFFC107)
+                            "failure" -> Color(0xFFEF4444)
+                            "back_off" -> Color(0xFF34D399)
+                            "drop" -> Color(0xFF3B82F6)
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Text("${set.setNumber}", color = typeColor, style = MaterialTheme.typography.labelMedium)
                     }
-                    Text("${set.setNumber}", color = typeColor, style = MaterialTheme.typography.labelMedium)
                 }
             }
         }

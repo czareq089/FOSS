@@ -44,6 +44,7 @@ import com.foss.app.models.ExerciseInfo
 import com.foss.app.models.ReorderPosition
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class SetRowState(val setNumber: Int) {
     var weight by mutableStateOf("")
@@ -348,7 +349,7 @@ fun WorkoutLoggingScreen(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             TextButton(onClick = { timerRemaining = maxOf(0, timerRemaining - 30) }) { Text("-30s", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                            Text(String.format("%02d:%02d", timerRemaining / 60, timerRemaining % 60), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+                            Text(String.format(Locale.US, "%02d:%02d", timerRemaining / 60, timerRemaining % 60), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
                             TextButton(onClick = { timerRemaining += 30; timerTotal += 30 }) { Text("+30s", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                         LinearProgressIndicator(progress = { if (timerTotal > 0) timerRemaining.toFloat() / timerTotal else 0f }, modifier = Modifier.fillMaxWidth().height(4.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surface)
@@ -399,11 +400,11 @@ fun WorkoutLoggingScreen(
                     },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = if (tempSeconds >= 15) String.format("%02d:%02d", (tempSeconds - 15) / 60, (tempSeconds - 15) % 60) else " ", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (tempSeconds >= 15) tempSeconds -= 15 }.padding(vertical = 12.dp), textAlign = TextAlign.Center)
+                    Text(text = if (tempSeconds >= 15) String.format(Locale.US, "%02d:%02d", (tempSeconds - 15) / 60, (tempSeconds - 15) % 60) else " ", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (tempSeconds >= 15) tempSeconds -= 15 }.padding(vertical = 12.dp), textAlign = TextAlign.Center)
                     Box(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-                        Text(String.format("%02d:%02d", tempSeconds / 60, tempSeconds % 60), style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
+                        Text(String.format(Locale.US, "%02d:%02d", tempSeconds / 60, tempSeconds % 60), style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
                     }
-                    Text(String.format("%02d:%02d", (tempSeconds + 15) / 60, (tempSeconds + 15) % 60), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { tempSeconds += 15 }.padding(vertical = 12.dp), textAlign = TextAlign.Center)
+                    Text(String.format(Locale.US, "%02d:%02d", (tempSeconds + 15) / 60, (tempSeconds + 15) % 60), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { tempSeconds += 15 }.padding(vertical = 12.dp), textAlign = TextAlign.Center)
                 }
 
                 Spacer(Modifier.height(24.dp))
@@ -477,20 +478,22 @@ private fun ExerciseLogContent(
 
     val sets = remember(exercise.workoutExerciseId) {
         val initialList = mutableStateListOf<SetRowState>()
-        if (!exercise.templateSets.isNullOrEmpty()) {
-            exercise.templateSets.forEach { template ->
-                val prevSet = exercise.lastSets?.find { it.setNumber == template.setNumber }
-                initialList.add(SetRowState(template.setNumber).apply {
-                    this.setType = template.setType
-                    if (prevSet != null) {
-                        this.fallbackWeight = if (prevSet.weightKg % 1.0 == 0.0) prevSet.weightKg.toInt().toString() else prevSet.weightKg.toString()
-                        this.fallbackReps = prevSet.reps.toString()
-                        this.fallbackRir = prevSet.rir.toString()
-                    }
-                })
-            }
-        } else {
-            initialList.add(SetRowState(1))
+        val templateCount = exercise.templateSets?.size ?: 0
+        val lastCount = exercise.lastSets?.size ?: 0
+        val totalCount = maxOf(1, maxOf(templateCount, lastCount))
+
+        for (i in 1..totalCount) {
+            val template = exercise.templateSets?.find { it.setNumber == i }
+            val prevSet = exercise.lastSets?.find { it.setNumber == i }
+
+            initialList.add(SetRowState(i).apply {
+                this.setType = template?.setType ?: "standard"
+                if (prevSet != null) {
+                    this.fallbackWeight = if (prevSet.weightKg % 1.0 == 0.0) prevSet.weightKg.toInt().toString() else prevSet.weightKg.toString()
+                    this.fallbackReps = prevSet.reps.toString()
+                    this.fallbackRir = prevSet.rir.toString()
+                }
+            })
         }
         initialList
     }
@@ -520,7 +523,7 @@ private fun ExerciseLogContent(
         ) {
             Icon(Icons.Filled.Timer, contentDescription = "Rest", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text(String.format("%02d:%02d", restSeconds / 60, restSeconds % 60), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+            Text(String.format(Locale.US, "%02d:%02d", restSeconds / 60, restSeconds % 60), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
         }
 
         Row(modifier = Modifier.fillMaxWidth()) {

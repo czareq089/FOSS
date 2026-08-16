@@ -161,3 +161,16 @@ data class ExerciseDetailAnalytics(
     @SerializedName("equipment") val equipment: String,
     @SerializedName("history") val history: List<ExerciseHistoryPoint>
 )
+
+data class RoutineHistoryPoint(
+    @SerializedName("workout_id") val workoutId: Int,
+    @SerializedName("date") val date: String,
+    @SerializedName("volume_kg") val volumeKg: Double,
+    @SerializedName("total_reps") val totalReps: Int
+)
+
+data class RoutineAnalyticsResponse(
+    @SerializedName("routine_id") val routineId: Int,
+    @SerializedName("name") val name: String,
+    @SerializedName("history") val history: List<RoutineHistoryPoint>
+)

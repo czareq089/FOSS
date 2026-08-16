@@ -170,6 +170,19 @@ type ExerciseDetailAnalytics struct {
 	History    []ExerciseHistoryPoint `json:"history"`
 }
 
+type RoutineHistoryPoint struct {
+	WorkoutID int     `json:"workout_id"`
+	Date      string  `json:"date"`
+	VolumeKg  float64 `json:"volume_kg"`
+	TotalReps int     `json:"total_reps"`
+}
+
+type RoutineAnalyticsResponse struct {
+	RoutineID int                   `json:"routine_id"`
+	Name      string                `json:"name"`
+	History   []RoutineHistoryPoint `json:"history"`
+}
+
 // ==========================================
 // FUNKCJE OBSŁUGI API
 // ==========================================
@@ -353,24 +366,25 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 	for i := range exercises {
 		var lastWorkoutExerciseID int
 		err := db.QueryRow(`
-			SELECT we.id FROM training_workout_exercises we
-			JOIN training_workouts w ON w.id = we.workout_id
+			SELECT we.id 
+			FROM training_workout_exercises we 
+			JOIN training_workouts w ON w.id = we.workout_id 
+			JOIN training_workout_sets s ON s.workout_exercise_id = we.id
 			WHERE w.user_id = ? AND we.exercise_id = ?
-			ORDER BY w.date DESC LIMIT 1`, userID, exercises[i].ExerciseID).Scan(&lastWorkoutExerciseID)
-		if err != nil {
-			continue
-		}
-
-		setRows, err := db.Query(`SELECT set_number, weight_kg, reps, rir FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, lastWorkoutExerciseID)
+			GROUP BY we.id
+			ORDER BY w.date DESC, w.id DESC LIMIT 1`, userID, exercises[i].ExerciseID).Scan(&lastWorkoutExerciseID)
 		if err == nil {
-			lastSets := []LastSetValue{}
-			for setRows.Next() {
-				var s LastSetValue
-				setRows.Scan(&s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir)
-				lastSets = append(lastSets, s)
+			setRows, errSet := db.Query(`SELECT set_number, weight_kg, reps, rir FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, lastWorkoutExerciseID)
+			if errSet == nil {
+				lastSets := []LastSetValue{}
+				for setRows.Next() {
+					var s LastSetValue
+					setRows.Scan(&s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir)
+					lastSets = append(lastSets, s)
+				}
+				setRows.Close()
+				exercises[i].LastSets = lastSets
 			}
-			setRows.Close()
-			exercises[i].LastSets = lastSets
 		}
 	}
 
@@ -673,7 +687,14 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 
 		lSets := []LastSetValue{}
 		var lastWeID int
-		err = db.QueryRow(`SELECT we.id FROM training_workout_exercises we JOIN training_workouts w ON w.id = we.workout_id WHERE w.user_id = ? AND we.exercise_id = ? AND w.id != ? ORDER BY w.date DESC LIMIT 1`, req.UserID, re.exerciseID, workoutID).Scan(&lastWeID)
+		err = db.QueryRow(`
+			SELECT we.id 
+			FROM training_workout_exercises we 
+			JOIN training_workouts w ON w.id = we.workout_id 
+			JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+			WHERE w.user_id = ? AND we.exercise_id = ? AND w.id != ? 
+			GROUP BY we.id
+			ORDER BY w.date DESC, w.id DESC LIMIT 1`, req.UserID, re.exerciseID, workoutID).Scan(&lastWeID)
 		if err == nil {
 			lsRows, _ := db.Query(`SELECT set_number, weight_kg, reps, rir FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, lastWeID)
 			for lsRows.Next() {
@@ -1051,7 +1072,7 @@ func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
 	if userID == "" {
 		userID = "1"
 	}
-	rangeParam := r.URL.Query().Get("range") // 1m, 3m, 6m, 1y, all
+	rangeParam := r.URL.Query().Get("range")
 
 	var interval string
 	switch rangeParam {
@@ -1113,6 +1134,64 @@ func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var pt ExerciseHistoryPoint
 		if err := rows.Scan(&pt.Date, &pt.MaxWeight, &pt.EstOneRM, &pt.Volume); err == nil {
+			resp.History = append(resp.History, pt)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	routineID := r.URL.Query().Get("routine_id")
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var resp RoutineAnalyticsResponse
+	err = db.QueryRow(`SELECT id, name FROM training_routines WHERE id = ?`, routineID).
+		Scan(&resp.RoutineID, &resp.Name)
+	if err != nil {
+		http.Error(w, "Routine not found", http.StatusNotFound)
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT 
+			w.id,
+			DATE(w.date) as log_date,
+			COALESCE(SUM(s.weight_kg * s.reps), 0) as total_volume,
+			COALESCE(SUM(s.reps), 0) as total_reps
+		FROM training_workouts w
+		JOIN training_workout_exercises we ON we.workout_id = w.id
+		JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+		WHERE w.routine_id = ? AND w.user_id = ?
+		GROUP BY w.id
+		HAVING total_volume > 0
+		ORDER BY w.date ASC, w.id ASC`, routineID, userID)
+	if err != nil {
+		http.Error(w, "Query error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	resp.History = []RoutineHistoryPoint{}
+	for rows.Next() {
+		var pt RoutineHistoryPoint
+		if err := rows.Scan(&pt.WorkoutID, &pt.Date, &pt.VolumeKg, &pt.TotalReps); err == nil {
 			resp.History = append(resp.History, pt)
 		}
 	}
