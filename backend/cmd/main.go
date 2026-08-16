@@ -43,6 +43,7 @@ func main() {
 	http.HandleFunc("/api/routines/sync", handleAPISyncRoutineFromWorkout)
 	http.HandleFunc("/api/exercises/analytics", handleAPIExerciseAnalytics)
 	http.HandleFunc("/api/routines/analytics", handleAPIRoutineAnalytics)
+	http.HandleFunc("/api/workouts/update", handleAPIWorkoutUpdateDetails)
 
 	// Uruchomienie serwera
 	port := ":8080"

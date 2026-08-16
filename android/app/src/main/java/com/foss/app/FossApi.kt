@@ -88,4 +88,7 @@ interface FossApi {
         @Query("routine_id") routineId: Int,
         @Query("user_id") userId: Int = 1
     ): Response<RoutineAnalyticsResponse>
+
+    @POST("/api/workouts/update")
+    suspend fun updateWorkoutDetails(@Body request: UpdateWorkoutDetailsReq): Response<Unit>
 }

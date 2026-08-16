@@ -183,6 +183,11 @@ type RoutineAnalyticsResponse struct {
 	History   []RoutineHistoryPoint `json:"history"`
 }
 
+type UpdateWorkoutDetailsReq struct {
+	WorkoutID int                     `json:"workout_id"`
+	Exercises []WorkoutDetailExercise `json:"exercises"`
+}
+
 // ==========================================
 // FUNKCJE OBSŁUGI API
 // ==========================================
@@ -1196,8 +1201,6 @@ func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
 			resp.History = append(resp.History, pt)
 		}
 	}
-
-	// Mock punkt zerowy: jeśli pierwszy trening nie był w dniu utworzenia rutyny, wstawiamy punkt startowy 0 kg
 	if len(resp.History) > 0 && createdAt != "" && resp.History[0].Date > createdAt {
 		zeroPoint := RoutineHistoryPoint{
 			WorkoutID: 0,
@@ -1210,4 +1213,77 @@ func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req UpdateWorkoutDetailsReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := tx.Exec(`
+		DELETE FROM training_workout_sets 
+		WHERE workout_exercise_id IN (
+			SELECT id FROM training_workout_exercises WHERE workout_id = ?
+		)`, req.WorkoutID); err != nil {
+		tx.Rollback()
+		http.Error(w, "Failed to clean old sets", http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := tx.Exec(`DELETE FROM training_workout_exercises WHERE workout_id = ?`, req.WorkoutID); err != nil {
+		tx.Rollback()
+		http.Error(w, "Failed to clean old exercises", http.StatusInternalServerError)
+		return
+	}
+
+	for exPos, ex := range req.Exercises {
+		res, err := tx.Exec(`
+			INSERT INTO training_workout_exercises (workout_id, exercise_id, position) 
+			VALUES (?, ?, ?)`, req.WorkoutID, ex.ExerciseID, exPos+1)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to insert workout exercise", http.StatusInternalServerError)
+			return
+		}
+		newWeID, _ := res.LastInsertId()
+
+		for sPos, s := range ex.Sets {
+			_, err := tx.Exec(`
+				INSERT INTO training_workout_sets (workout_exercise_id, set_number, weight_kg, reps, rir, set_type) 
+				VALUES (?, ?, ?, ?, ?, 'standard')`,
+				newWeID, sPos+1, s.WeightKg, s.Reps, s.Rir)
+			if err != nil {
+				tx.Rollback()
+				http.Error(w, "Failed to insert workout set", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit changes", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

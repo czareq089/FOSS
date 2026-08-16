@@ -77,18 +77,14 @@ fun RoutineDetailScreen(
 
     val previewState = viewModel.routineExercisesState.value
     val analyticsState = viewModel.routineAnalyticsState.value
-    val startState = viewModel.workoutState.value
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState()
+    var isStartingWorkout by remember { mutableStateOf(false) }
 
     var activeSetForType by remember { mutableStateOf<Pair<RoutineExercisePreview, Int>?>(null) }
 
     val routineName = (viewModel.routinesState.value as? UiState.Success)
         ?.data?.firstOrNull { it.id == routineId }?.name ?: "Routine"
-
-    LaunchedEffect(startState) {
-        if (startState is UiState.Success) onStartWorkout(startState.data.first)
-    }
 
     var editMode by remember { mutableStateOf(startInEditMode) }
     val exercises = remember { mutableStateListOf<RoutineExercisePreview>() }
@@ -114,7 +110,7 @@ fun RoutineDetailScreen(
                                 val positions = exercises.mapIndexed { index, ex -> ReorderPosition(exerciseId = ex.exerciseId, position = index + 1) }
                                 viewModel.reorderExercises(routineId, positions)
                                 exercises.forEach { ex ->
-                                    val safeSets = ex.mutableTemplateSets.mapIndexed { i, s -> RoutineSet(i + 1, s.setType) }
+                                    val safeSets = (ex.templateSets ?: listOf(RoutineSet(1, "standard"))).mapIndexed { i, s -> RoutineSet(i + 1, s.setType) }
                                     viewModel.updateRoutineSets(ex.routineExerciseId, safeSets)
                                 }
                                 viewModel.loadRoutineExercises(routineId)
@@ -133,12 +129,23 @@ fun RoutineDetailScreen(
                 Surface(shadowElevation = 8.dp) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Button(
-                            onClick = { viewModel.startWorkout(routineId) },
-                            enabled = startState !is UiState.Loading,
+                            onClick = {
+                                if (!isStartingWorkout) {
+                                    isStartingWorkout = true
+                                    scope.launch {
+                                        val workoutId = viewModel.startWorkout(routineId)
+                                        isStartingWorkout = false
+                                        if (workoutId != null) {
+                                            onStartWorkout(workoutId)
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !isStartingWorkout,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            if (startState is UiState.Loading) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            if (isStartingWorkout) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             else Text("Start workout")
                         }
                     }
@@ -201,7 +208,10 @@ fun RoutineDetailScreen(
                 val (ex, index) = activeSetForType!!
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
                     val updateType = { type: String ->
-                        ex.mutableTemplateSets[index] = ex.mutableTemplateSets[index].copy(setType = type)
+                        val currentSets = ex.mutableTemplateSets
+                        if (index in currentSets.indices) {
+                            currentSets[index] = currentSets[index].copy(setType = type)
+                        }
                         activeSetForType = null
                     }
                     SetTypeOption("standard", "Standard set", null, Color.White) { updateType("standard") }
@@ -380,7 +390,7 @@ private fun ExercisePreviewCard(
                     .alpha(if (isTitlePressed) 0.4f else 1f)
             )
 
-            val displaySets = exercise.mutableTemplateSets
+            val displaySets = exercise.templateSets ?: emptyList()
             if (displaySets.isNotEmpty()) {
                 Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     displaySets.forEach { set ->
@@ -480,10 +490,11 @@ private fun ReorderableExerciseList(
                                                 },
                                                 onDragEnd = {
                                                     if (draggedIndex != null && targetIndex != null && draggedIndex != targetIndex) {
-                                                        val from = draggedIndex!!
-                                                        val safeTo = targetIndex!!.coerceIn(0, exercises.size - 1)
+                                                        val from = draggedIndex!!.coerceIn(0, exercises.size - 1)
+                                                        val to = targetIndex!!.coerceIn(0, exercises.size - 1)
                                                         val moved = exercises.removeAt(from)
-                                                        exercises.add(safeTo, moved)
+                                                        val safeInsert = to.coerceIn(0, exercises.size)
+                                                        exercises.add(safeInsert, moved)
                                                     }
                                                     draggedIndex = null
                                                     targetIndex = null
@@ -547,7 +558,8 @@ private fun ReorderableExerciseList(
 
                                 Spacer(Modifier.height(8.dp))
 
-                                exercise.mutableTemplateSets.forEachIndexed { sIndex, set ->
+                                val templateList = exercise.mutableTemplateSets
+                                templateList.forEachIndexed { sIndex, set ->
                                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
 
                                         val typeColor = when(set.setType) {
@@ -595,7 +607,7 @@ private fun ReorderableExerciseList(
                                         )
 
                                         Box(modifier = Modifier.weight(0.5f), contentAlignment = Alignment.Center) {
-                                            IconButton(onClick = { exercise.mutableTemplateSets.removeAt(sIndex) }, modifier = Modifier.size(28.dp)) {
+                                            IconButton(onClick = { if (sIndex in templateList.indices) templateList.removeAt(sIndex) }, modifier = Modifier.size(28.dp)) {
                                                 Icon(Icons.Filled.Close, contentDescription = "Remove set", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                                             }
                                         }
@@ -603,7 +615,7 @@ private fun ReorderableExerciseList(
                                 }
 
                                 TextButton(
-                                    onClick = { exercise.mutableTemplateSets.add(RoutineSet(exercise.mutableTemplateSets.size + 1, "standard")) },
+                                    onClick = { templateList.add(RoutineSet(templateList.size + 1, "standard")) },
                                     modifier = Modifier.align(Alignment.End).padding(top = 4.dp)
                                 ) {
                                     Text("+ Add set", color = MaterialTheme.colorScheme.primary)

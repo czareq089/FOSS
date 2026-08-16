@@ -174,3 +174,8 @@ data class RoutineAnalyticsResponse(
     @SerializedName("name") val name: String,
     @SerializedName("history") val history: List<RoutineHistoryPoint>
 )
+
+data class UpdateWorkoutDetailsReq(
+    @SerializedName("workout_id") val workoutId: Int,
+    @SerializedName("exercises") val exercises: List<WorkoutDetailExercise>
+)
