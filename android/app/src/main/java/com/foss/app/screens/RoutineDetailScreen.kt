@@ -50,6 +50,7 @@ fun RoutineDetailScreen(
     startInEditMode: Boolean = false,
     onStartWorkout: (workoutId: Int) -> Unit,
     onAddExerciseClick: () -> Unit,
+    onExerciseClick: (exerciseId: Int) -> Unit,
     onBack: () -> Unit
 ) {
     LaunchedEffect(routineId) {
@@ -145,7 +146,10 @@ fun RoutineDetailScreen(
                                 items = exercises,
                                 key = { _, ex -> ex.exerciseId }
                             ) { _, exercise ->
-                                ExercisePreviewCard(exercise)
+                                ExercisePreviewCard(
+                                    exercise = exercise,
+                                    onExerciseClick = { onExerciseClick(exercise.exerciseId) }
+                                )
                             }
                         }
                     }
@@ -187,14 +191,32 @@ fun SetTypeOption(type: String, label: String, letter: String?, color: Color, on
 }
 
 @Composable
-private fun ExercisePreviewCard(exercise: RoutineExercisePreview) {
+private fun ExercisePreviewCard(
+    exercise: RoutineExercisePreview,
+    onExerciseClick: () -> Unit
+) {
+    val titleInteractionSource = remember { MutableInteractionSource() }
+    val isTitlePressed by titleInteractionSource.collectIsPressedAsState()
+
     OutlinedCard(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(exercise.name, style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = exercise.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .clickable(
+                        interactionSource = titleInteractionSource,
+                        indication = null,
+                        onClick = onExerciseClick
+                    )
+                    .alpha(if (isTitlePressed) 0.4f else 1f)
+            )
 
             Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 exercise.mutableTemplateSets.forEach { set ->
@@ -214,7 +236,8 @@ private fun ExercisePreviewCard(exercise: RoutineExercisePreview) {
 
 @Composable
 private fun ReorderableExerciseList(
-    routineId: Int, viewModel: WorkoutViewModel,
+    routineId: Int,
+    viewModel: WorkoutViewModel,
     exercises: androidx.compose.runtime.snapshots.SnapshotStateList<RoutineExercisePreview>,
     onAddExerciseClick: () -> Unit,
     onOpenSetType: (RoutineExercisePreview, Int) -> Unit
@@ -293,7 +316,6 @@ private fun ReorderableExerciseList(
                                                 onDragEnd = {
                                                     if (draggedIndex != null && targetIndex != null && draggedIndex != targetIndex) {
                                                         val from = draggedIndex!!
-                                                        // FIX: Bezpieczny limit docelowy zapobiegający crashem
                                                         val safeTo = targetIndex!!.coerceIn(0, exercises.size - 1)
                                                         val moved = exercises.removeAt(from)
                                                         exercises.add(safeTo, moved)

@@ -155,6 +155,21 @@ type UpdateRoutineSetsReq struct {
 	Sets              []RoutineSet `json:"sets"`
 }
 
+type ExerciseHistoryPoint struct {
+	Date      string  `json:"date"`
+	MaxWeight float64 `json:"max_weight"`
+	EstOneRM  float64 `json:"est_one_rm"`
+	Volume    float64 `json:"volume"`
+}
+
+type ExerciseDetailAnalytics struct {
+	ExerciseID int                    `json:"exercise_id"`
+	Name       string                 `json:"name"`
+	Type       string                 `json:"type"`
+	Equipment  string                 `json:"equipment"`
+	History    []ExerciseHistoryPoint `json:"history"`
+}
+
 // ==========================================
 // FUNKCJE OBSŁUGI API
 // ==========================================
@@ -1023,4 +1038,85 @@ func handleAPISyncRoutineFromWorkout(w http.ResponseWriter, r *http.Request) {
 
 	tx.Commit()
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	exerciseID := r.URL.Query().Get("exercise_id")
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+	rangeParam := r.URL.Query().Get("range") // 1m, 3m, 6m, 1y, all
+
+	var interval string
+	switch rangeParam {
+	case "1m":
+		interval = "-1 month"
+	case "3m":
+		interval = "-3 month"
+	case "6m":
+		interval = "-6 month"
+	case "1y":
+		interval = "-1 year"
+	default:
+		interval = ""
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var resp ExerciseDetailAnalytics
+	err = db.QueryRow(`SELECT id, name, type, equipment FROM training_exercises WHERE id = ?`, exerciseID).
+		Scan(&resp.ExerciseID, &resp.Name, &resp.Type, &resp.Equipment)
+	if err != nil {
+		http.Error(w, "Exercise not found", http.StatusNotFound)
+		return
+	}
+
+	query := `
+		SELECT 
+			DATE(w.date) as log_date,
+			COALESCE(MAX(s.weight_kg), 0) as max_w,
+			COALESCE(MAX(s.weight_kg * (1.0 + (s.reps / 30.0))), 0) as max_1rm,
+			COALESCE(SUM(s.weight_kg * s.reps), 0) as total_vol
+		FROM training_workout_exercises we
+		JOIN training_workouts w ON w.id = we.workout_id
+		JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+		WHERE we.exercise_id = ? AND w.user_id = ?`
+
+	var args []interface{}
+	if interval == "" {
+		query += ` GROUP BY DATE(w.date) ORDER BY DATE(w.date) ASC`
+		args = []interface{}{exerciseID, userID}
+	} else {
+		query += ` AND w.date >= datetime('now', ?) GROUP BY DATE(w.date) ORDER BY DATE(w.date) ASC`
+		args = []interface{}{exerciseID, userID, interval}
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		http.Error(w, "Query execution error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	resp.History = []ExerciseHistoryPoint{}
+	for rows.Next() {
+		var pt ExerciseHistoryPoint
+		if err := rows.Scan(&pt.Date, &pt.MaxWeight, &pt.EstOneRM, &pt.Volume); err == nil {
+			resp.History = append(resp.History, pt)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

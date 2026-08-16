@@ -146,3 +146,18 @@ data class UpdateRoutineSetsReq(
     @SerializedName("routine_exercise_id") val routineExerciseId: Int,
     @SerializedName("sets") val sets: List<RoutineSet>
 )
+
+data class ExerciseHistoryPoint(
+    @SerializedName("date") val date: String,
+    @SerializedName("max_weight") val maxWeight: Double,
+    @SerializedName("est_one_rm") val estOneRM: Double,
+    @SerializedName("volume") val volume: Double
+)
+
+data class ExerciseDetailAnalytics(
+    @SerializedName("exercise_id") val exerciseId: Int,
+    @SerializedName("name") val name: String,
+    @SerializedName("type") val type: String,
+    @SerializedName("equipment") val equipment: String,
+    @SerializedName("history") val history: List<ExerciseHistoryPoint>
+)

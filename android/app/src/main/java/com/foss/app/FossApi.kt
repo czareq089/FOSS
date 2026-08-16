@@ -75,4 +75,11 @@ interface FossApi {
 
     @POST("/api/routines/sync")
     suspend fun syncRoutineFromWorkout(@Body request: SyncRoutineReq): Response<Unit>
+
+    @GET("/api/exercises/analytics")
+    suspend fun getExerciseAnalytics(
+        @Query("exercise_id") exerciseId: Int,
+        @Query("range") range: String = "all",
+        @Query("user_id") userId: Int = 1
+    ): Response<ExerciseDetailAnalytics>
 }

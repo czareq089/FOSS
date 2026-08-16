@@ -65,6 +65,7 @@ class SetRowState(val setNumber: Int) {
 fun WorkoutLoggingScreen(
     viewModel: WorkoutViewModel,
     onAddExerciseClick: () -> Unit,
+    onExerciseClick: (Int) -> Unit,
     onFinish: () -> Unit,
     onCancelWorkout: () -> Unit
 ) {
@@ -218,7 +219,10 @@ fun WorkoutLoggingScreen(
                                     }
                             ) {
                                 Column(modifier = Modifier.padding(16.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
                                         if (isReordering) {
                                             Icon(
                                                 Icons.Filled.DragHandle,
@@ -278,7 +282,22 @@ fun WorkoutLoggingScreen(
                                             )
                                             Spacer(Modifier.width(8.dp))
                                         }
-                                        Text(exercise.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+
+                                        val titleInteractionSource = remember { MutableInteractionSource() }
+                                        val isTitlePressed by titleInteractionSource.collectIsPressedAsState()
+
+                                        Text(
+                                            text = exercise.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier
+                                                .clickable(
+                                                    interactionSource = titleInteractionSource,
+                                                    indication = null,
+                                                    enabled = !isReordering
+                                                ) { onExerciseClick(exercise.exerciseId) }
+                                                .alpha(if (isTitlePressed && !isReordering) 0.4f else 1f)
+                                        )
                                     }
 
                                     AnimatedVisibility(

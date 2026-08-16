@@ -257,4 +257,20 @@ class WorkoutViewModel : ViewModel() {
             false
         }
     }
+
+    var exerciseAnalyticsState = mutableStateOf<UiState<ExerciseDetailAnalytics>>(UiState.Idle)
+        private set
+
+    fun loadExerciseAnalytics(exerciseId: Int, range: String = "all") {
+        viewModelScope.launch {
+            exerciseAnalyticsState.value = UiState.Loading
+            try {
+                val response = api.getExerciseAnalytics(exerciseId, range, currentUserId)
+                exerciseAnalyticsState.value = if (response.isSuccessful && response.body() != null)
+                    UiState.Success(response.body()!!) else UiState.Error("Server error: ${response.code()}")
+            } catch (e: Exception) {
+                exerciseAnalyticsState.value = UiState.Error(e.message ?: "Unknown connection error")
+            }
+        }
+    }
 }

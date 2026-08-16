@@ -29,6 +29,7 @@ import com.foss.app.navigation.BottomNavItem
 import com.foss.app.navigation.FossBottomNavBar
 import com.foss.app.screens.DashboardScreen
 import com.foss.app.screens.DietScreen
+import com.foss.app.screens.ExerciseDetailScreen
 import com.foss.app.screens.ExerciseSelectionScreen
 import com.foss.app.screens.RoutineDetailScreen
 import com.foss.app.screens.TrainingScreen
@@ -145,6 +146,9 @@ fun FossApp() {
                     onAddExerciseClick = {
                         navController.navigate("exerciseSelection/routine/$routineId")
                     },
+                    onExerciseClick = { exerciseId ->
+                        navController.navigate("exerciseDetail/$exerciseId")
+                    },
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -205,6 +209,9 @@ fun FossApp() {
                     onAddExerciseClick = {
                         navController.navigate("exerciseSelection/workout/$workoutId")
                     },
+                    onExerciseClick = { exerciseId ->
+                        navController.navigate("exerciseDetail/$exerciseId")
+                    },
                     onFinish = {
                         navController.navigate(BottomNavItem.Training.route) {
                             popUpTo(BottomNavItem.Dashboard.route)
@@ -215,6 +222,18 @@ fun FossApp() {
                             popUpTo(BottomNavItem.Dashboard.route)
                         }
                     }
+                )
+            }
+
+            composable(
+                route = "exerciseDetail/{exerciseId}",
+                arguments = listOf(navArgument("exerciseId") { type = NavType.IntType })
+            ) { entry ->
+                val exerciseId = entry.arguments?.getInt("exerciseId") ?: return@composable
+                ExerciseDetailScreen(
+                    viewModel = viewModel,
+                    exerciseId = exerciseId,
+                    onBack = { navController.popBackStack() }
                 )
             }
         }
