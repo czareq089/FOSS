@@ -4,7 +4,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,6 +31,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.foss.app.UiState
 import com.foss.app.WorkoutViewModel
@@ -55,12 +61,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-class SetRowState(val setNumber: Int) {
+class SetRowState(initialSetNumber: Int) {
+    var setNumber by mutableIntStateOf(initialSetNumber)
     var weight by mutableStateOf("")
     var reps by mutableStateOf("")
     var rir by mutableStateOf("")
     var confirmed by mutableStateOf(false)
     var submitting by mutableStateOf(false)
+    var isPr by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var autoFilled by mutableStateOf(true)
     var setType by mutableStateOf("standard")
@@ -121,6 +129,15 @@ fun WorkoutLoggingScreen(
     val exerciseSetsMap = remember { mutableStateMapOf<Int, List<SetRowState>>() }
     val sheetState = rememberModalBottomSheetState()
 
+    var prBannerText by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(prBannerText) {
+        if (prBannerText != null) {
+            delay(3500L)
+            prBannerText = null
+        }
+    }
+
     var timerRemaining by remember { mutableIntStateOf(0) }
     var timerTotal by remember { mutableIntStateOf(0) }
     var isTimerRunning by remember { mutableStateOf(false) }
@@ -175,6 +192,7 @@ fun WorkoutLoggingScreen(
 
     val allActiveSets = exerciseSetsMap.values.flatten()
     val confirmedSetsCount = allActiveSets.count { it.confirmed }
+    val prCount = allActiveSets.count { it.confirmed && it.isPr }
     val totalVolumeKg = allActiveSets.filter { it.confirmed }.sumOf { row ->
         val w = row.weight.toDoubleOrNull() ?: row.fallbackWeight.toDoubleOrNull() ?: 0.0
         val r = row.reps.toIntOrNull() ?: row.fallbackReps.toIntOrNull() ?: 0
@@ -326,7 +344,7 @@ fun WorkoutLoggingScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                                        .padding(horizontal = 20.dp, vertical = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -345,11 +363,29 @@ fun WorkoutLoggingScreen(
                                     )
 
                                     Text(
-                                        text = "$confirmedSetsCount",
+                                        text = "$confirmedSetsCount sets",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Stars,
+                                            contentDescription = "PR count",
+                                            tint = if (prCount > 0) AccentBlue else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "$prCount PR",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (prCount > 0) AccentBlue else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -521,6 +557,9 @@ fun WorkoutLoggingScreen(
                                             onOpenSetType = { row -> activeSetRowForType = row },
                                             onSetsUpdated = { setList ->
                                                 exerciseSetsMap[exercise.workoutExerciseId] = setList
+                                            },
+                                            onPrAchieved = { msg ->
+                                                prBannerText = msg
                                             }
                                         )
                                     }
@@ -548,6 +587,60 @@ fun WorkoutLoggingScreen(
                 }
             } else {
                 Text("No active workout.", modifier = Modifier.align(Alignment.Center))
+            }
+            
+            AnimatedVisibility(
+                visible = prBannerText != null,
+                enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 12.dp, start = 16.dp, end = 16.dp)
+                    .zIndex(20f)
+            ) {
+                OutlinedCard(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    border = BorderStroke(1.5.dp, AccentBlue),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = AccentBlue.copy(alpha = 0.2f),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Filled.Stars,
+                                    contentDescription = "PR",
+                                    tint = AccentBlue,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "NEW PERSONAL RECORD!",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentBlue
+                            )
+                            Text(
+                                text = prBannerText ?: "",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
             }
 
             if (isTimerRunning || timerRemaining > 0) {
@@ -633,7 +726,7 @@ fun WorkoutLoggingScreen(
                 SetTypeOption("standard", "Standard set", null, Color.White) { updateType("standard") }
                 SetTypeOption("warmup", "Warmup set", "W", Color(0xFFFFC107)) { updateType("warmup") }
                 SetTypeOption("failure", "Failure set", "F", Color(0xFFEF4444)) { updateType("failure") }
-                SetTypeOption("drop", "Drop set", "D", Color(0xFF3B82F6)) { updateType("drop") }
+                SetTypeOption("drop", "Drop set", "D", Color(0xFFA855F7)) { updateType("drop") }
                 SetTypeOption("back_off", "Back-off set", "B", Color(0xFF34D399)) { updateType("back_off") }
             }
         }
@@ -943,7 +1036,8 @@ private fun ExerciseLogContent(
     onStartTimer: (Int) -> Unit,
     onCancelTimer: () -> Unit,
     onOpenSetType: (SetRowState) -> Unit,
-    onSetsUpdated: (List<SetRowState>) -> Unit
+    onSetsUpdated: (List<SetRowState>) -> Unit,
+    onPrAchieved: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
 
@@ -1106,7 +1200,11 @@ private fun ExerciseLogContent(
         sets.forEachIndexed { rowIndex, row ->
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 val typeColor = when(row.setType) {
-                    "warmup" -> Color(0xFFFFC107); "failure" -> Color(0xFFEF4444); "back_off" -> Color(0xFF34D399); "drop" -> Color(0xFF3B82F6); else -> MaterialTheme.colorScheme.onSurface
+                    "warmup" -> Color(0xFFFFC107)
+                    "failure" -> Color(0xFFEF4444)
+                    "back_off" -> Color(0xFF34D399)
+                    "drop" -> Color(0xFFA855F7)
+                    else -> AccentBlue
                 }
                 val typeInteractionSource = remember { MutableInteractionSource() }
                 val isTypePressed by typeInteractionSource.collectIsPressedAsState()
@@ -1119,8 +1217,23 @@ private fun ExerciseLogContent(
                         .alpha(if (isTypePressed) 0.4f else 1f)
                         .padding(vertical = 8.dp)
                 ) {
-                    Text("${row.setNumber}", color = typeColor, style = MaterialTheme.typography.titleMedium)
+                    if (row.confirmed && row.isPr) {
+                        Icon(
+                            imageVector = Icons.Filled.Stars,
+                            contentDescription = "PR Record",
+                            tint = typeColor,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    } else {
+                        Text(
+                            text = "${row.setNumber}",
+                            color = if (row.setType == "standard" && !row.confirmed) MaterialTheme.colorScheme.onSurface else typeColor,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
                 }
+
+                val rowTextColor = if (row.confirmed && row.isPr) typeColor else MaterialTheme.colorScheme.onSurface
 
                 OutlinedTextField(
                     value = row.weight,
@@ -1130,7 +1243,14 @@ private fun ExerciseLogContent(
                     placeholder = { if (row.fallbackWeight.isNotEmpty()) Text(row.fallbackWeight, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = rowTextColor,
+                        unfocusedTextColor = rowTextColor,
+                        disabledTextColor = rowTextColor,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                    ),
                     shape = RoundedCornerShape(8.dp)
                 )
                 OutlinedTextField(
@@ -1141,7 +1261,14 @@ private fun ExerciseLogContent(
                     placeholder = { if (row.fallbackReps.isNotEmpty()) Text(row.fallbackReps, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = rowTextColor,
+                        unfocusedTextColor = rowTextColor,
+                        disabledTextColor = rowTextColor,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                    ),
                     shape = RoundedCornerShape(8.dp)
                 )
                 OutlinedTextField(
@@ -1152,7 +1279,14 @@ private fun ExerciseLogContent(
                     placeholder = { if (row.fallbackRir.isNotEmpty()) Text(row.fallbackRir, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = rowTextColor,
+                        unfocusedTextColor = rowTextColor,
+                        disabledTextColor = rowTextColor,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                    ),
                     shape = RoundedCornerShape(8.dp)
                 )
 
@@ -1181,8 +1315,29 @@ private fun ExerciseLogContent(
 
                                         val reps = row.reps.toIntOrNull() ?: 0
                                         val weight = row.weight.toDoubleOrNull() ?: 0.0
-                                        row.error = null
 
+                                        val current1RM = weight * (1.0 + (reps / 30.0))
+                                        val prevHistory1RM = exercise.lastSets?.maxOfOrNull { it.weightKg * (1.0 + (it.reps / 30.0)) } ?: 0.0
+                                        val currentWorkoutPrior1RM = sets.filter { it !== row && it.confirmed }.maxOfOrNull {
+                                            val w = it.weight.toDoubleOrNull() ?: 0.0
+                                            val r = it.reps.toIntOrNull() ?: 0
+                                            w * (1.0 + (r / 30.0))
+                                        } ?: 0.0
+
+                                        val benchmark1RM = maxOf(prevHistory1RM, currentWorkoutPrior1RM)
+                                        val isNewPr = if (benchmark1RM > 0.0) {
+                                            current1RM > benchmark1RM
+                                        } else {
+                                            weight > 0.0 && reps > 0
+                                        }
+
+                                        if (isNewPr && weight > 0.0 && reps > 0) {
+                                            row.isPr = true
+                                            val weightStr = if (weight % 1.0 == 0.0) weight.toInt().toString() else weight.toString()
+                                            onPrAchieved("${exercise.name}: $weightStr kg × $reps")
+                                        }
+
+                                        row.error = null
                                         row.confirmed = true
                                         row.submitting = true
                                         onSetsUpdated(sets.toList())
@@ -1207,12 +1362,14 @@ private fun ExerciseLogContent(
                                                 onSetsUpdated(sets.toList())
                                             } else {
                                                 row.confirmed = false
+                                                row.isPr = false
                                                 row.error = "Failed"
                                                 onSetsUpdated(sets.toList())
                                             }
                                         }
                                     } else {
                                         row.confirmed = false
+                                        row.isPr = false
                                         onSetsUpdated(sets.toList())
                                     }
                                 }
@@ -1243,6 +1400,9 @@ private fun ExerciseLogContent(
                                         indication = null
                                     ) {
                                         sets.remove(row)
+                                        sets.forEachIndexed { idx, s ->
+                                            s.setNumber = idx + 1
+                                        }
                                         onSetsUpdated(sets.toList())
                                     },
                                 contentAlignment = Alignment.Center
