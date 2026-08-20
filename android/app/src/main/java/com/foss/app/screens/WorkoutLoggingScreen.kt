@@ -15,12 +15,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Balance
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
@@ -34,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -44,6 +48,7 @@ import com.foss.app.models.ExerciseInfo
 import com.foss.app.models.PlateCalculator
 import com.foss.app.models.ReorderPosition
 import com.foss.app.models.UserAlgorithmSettings
+import com.foss.app.models.UserPlate
 import com.foss.app.ui.theme.AccentBlue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -81,12 +86,16 @@ fun WorkoutLoggingScreen(
     }
     val state = viewModel.workoutState.value
     var showCancelDialog by remember { mutableStateOf(false) }
+    var showDiscardEditDialog by remember { mutableStateOf(false) }
     var showSyncDialog by remember { mutableStateOf(false) }
+    var exerciseToDelete by remember { mutableStateOf<ExerciseInfo?>(null) }
     var cancelling by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     var activeSetRowForType by remember { mutableStateOf<SetRowState?>(null) }
     var activeExerciseForTimer by remember { mutableStateOf<ExerciseInfo?>(null) }
+    var activeExerciseForPlates by remember { mutableStateOf<Pair<ExerciseInfo, Double>?>(null) }
+
     val exerciseRestTimes = remember { mutableStateMapOf<Int, Int>() }
     val sheetState = rememberModalBottomSheetState()
 
@@ -99,6 +108,12 @@ fun WorkoutLoggingScreen(
     var hasStructureChanged by remember { mutableStateOf(false) }
 
     val exercises = remember { mutableStateListOf<ExerciseInfo>() }
+    var initialExercisesBackup by remember { mutableStateOf<List<ExerciseInfo>>(emptyList()) }
+
+    fun hasPendingEdits(): Boolean {
+        if (exercises.size != initialExercisesBackup.size) return true
+        return exercises.map { it.workoutExerciseId } != initialExercisesBackup.map { it.workoutExerciseId }
+    }
 
     LaunchedEffect(state) {
         if (state is UiState.Success) {
@@ -124,12 +139,22 @@ fun WorkoutLoggingScreen(
         }
     }
 
-    BackHandler { showCancelDialog = true }
+    BackHandler {
+        if (isReordering) {
+            if (hasPendingEdits()) {
+                showDiscardEditDialog = true
+            } else {
+                isReordering = false
+            }
+        } else {
+            showCancelDialog = true
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Log workout") },
+                title = { Text(if (isReordering) "Edit exercises" else "Log workout") },
                 navigationIcon = {
                     val closeSource = remember { MutableInteractionSource() }
                     val isClosePressed by closeSource.collectIsPressedAsState()
@@ -142,10 +167,20 @@ fun WorkoutLoggingScreen(
                             .clickable(
                                 interactionSource = closeSource,
                                 indication = null
-                            ) { showCancelDialog = true },
+                            ) {
+                                if (isReordering) {
+                                    if (hasPendingEdits()) {
+                                        showDiscardEditDialog = true
+                                    } else {
+                                        isReordering = false
+                                    }
+                                } else {
+                                    showCancelDialog = true
+                                }
+                            },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(Icons.Filled.Close, contentDescription = if (isReordering) "Discard edits" else "Cancel workout", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
                 actions = {
@@ -197,8 +232,12 @@ fun WorkoutLoggingScreen(
                             MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(surface = MaterialTheme.colorScheme.surfaceVariant)) {
                                 DropdownMenu(expanded = isMenuExpanded, onDismissRequest = { isMenuExpanded = false }, modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
                                     DropdownMenuItem(
-                                        text = { Text("Reorder exercises", color = MaterialTheme.colorScheme.onSurface) },
-                                        onClick = { isMenuExpanded = false; isReordering = true },
+                                        text = { Text("Edit exercises", color = MaterialTheme.colorScheme.onSurface) },
+                                        onClick = {
+                                            isMenuExpanded = false
+                                            initialExercisesBackup = exercises.toList()
+                                            isReordering = true
+                                        },
                                         leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
                                     )
                                 }
@@ -209,20 +248,21 @@ fun WorkoutLoggingScreen(
             )
         },
         bottomBar = {
-            Button(
-                onClick = {
-                    if (hasStructureChanged) showSyncDialog = true else onFinish()
-                },
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Finish workout")
+            if (!isReordering) {
+                Button(
+                    onClick = {
+                        if (hasStructureChanged) showSyncDialog = true else onFinish()
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Finish workout")
+                }
             }
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (state is UiState.Success) {
-
                 var draggedIndex by remember { mutableStateOf<Int?>(null) }
                 var targetIndex by remember { mutableStateOf<Int?>(null) }
                 var dragOffsetY by remember { mutableFloatStateOf(0f) }
@@ -275,84 +315,110 @@ fun WorkoutLoggingScreen(
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        if (isReordering) {
-                                            Icon(
-                                                Icons.Filled.DragHandle,
-                                                contentDescription = "Drag to reorder",
-                                                tint = if (isDragged) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            if (isReordering) {
+                                                Icon(
+                                                    Icons.Filled.DragHandle,
+                                                    contentDescription = "Drag to reorder",
+                                                    tint = if (isDragged) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .pointerInput(exercise, index) {
+                                                            detectVerticalDragGestures(
+                                                                onDragStart = {
+                                                                    draggedIndex = index
+                                                                    targetIndex = index
+                                                                    dragOffsetY = 0f
+                                                                    initialItemOffset = listState.layoutInfo.visibleItemsInfo.find { it.index == index }?.offset ?: 0
+                                                                },
+                                                                onDragEnd = {
+                                                                    if (draggedIndex != null && targetIndex != null && draggedIndex != targetIndex) {
+                                                                        val from = draggedIndex!!.coerceIn(0, exercises.size - 1)
+                                                                        val to = targetIndex!!.coerceIn(0, exercises.size - 1)
+                                                                        val moved = exercises.removeAt(from)
+                                                                        val safeInsert = to.coerceIn(0, exercises.size)
+                                                                        exercises.add(safeInsert, moved)
+                                                                    }
+                                                                    draggedIndex = null
+                                                                    targetIndex = null
+                                                                    dragOffsetY = 0f
+                                                                },
+                                                                onDragCancel = {
+                                                                    draggedIndex = null
+                                                                    targetIndex = null
+                                                                    dragOffsetY = 0f
+                                                                },
+                                                                onVerticalDrag = { change, dragAmount ->
+                                                                    change.consume()
+                                                                    dragOffsetY += dragAmount
+
+                                                                    val currentDragged = draggedIndex ?: return@detectVerticalDragGestures
+                                                                    val layoutInfo = listState.layoutInfo
+                                                                    val draggedItemInfo = layoutInfo.visibleItemsInfo.find { it.index == currentDragged }
+
+                                                                    if (draggedItemInfo != null) {
+                                                                        val draggedHeight = draggedItemInfo.size
+                                                                        val centerOnScreen = initialItemOffset + dragOffsetY + (draggedHeight / 2f)
+
+                                                                        val target = layoutInfo.visibleItemsInfo.find {
+                                                                            it.index < exercises.size &&
+                                                                                    centerOnScreen > it.offset &&
+                                                                                    centerOnScreen < it.offset + it.size
+                                                                        }
+                                                                        if (target != null) {
+                                                                            targetIndex = target.index
+                                                                        }
+                                                                    }
+                                                                }
+                                                            )
+                                                        }
+                                                        .padding(4.dp)
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                            }
+
+                                            val titleInteractionSource = remember { MutableInteractionSource() }
+                                            val isTitlePressed by titleInteractionSource.collectIsPressedAsState()
+
+                                            Text(
+                                                text = exercise.name,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 modifier = Modifier
-                                                    .size(36.dp)
-                                                    .pointerInput(exercise, index) {
-                                                        detectVerticalDragGestures(
-                                                            onDragStart = {
-                                                                draggedIndex = index
-                                                                targetIndex = index
-                                                                dragOffsetY = 0f
-                                                                initialItemOffset = listState.layoutInfo.visibleItemsInfo.find { it.index == index }?.offset ?: 0
-                                                            },
-                                                            onDragEnd = {
-                                                                if (draggedIndex != null && targetIndex != null && draggedIndex != targetIndex) {
-                                                                    val from = draggedIndex!!.coerceIn(0, exercises.size - 1)
-                                                                    val to = targetIndex!!.coerceIn(0, exercises.size - 1)
-                                                                    val moved = exercises.removeAt(from)
-                                                                    val safeInsert = to.coerceIn(0, exercises.size)
-                                                                    exercises.add(safeInsert, moved)
-                                                                }
-                                                                draggedIndex = null
-                                                                targetIndex = null
-                                                                dragOffsetY = 0f
-                                                            },
-                                                            onDragCancel = {
-                                                                draggedIndex = null
-                                                                targetIndex = null
-                                                                dragOffsetY = 0f
-                                                            },
-                                                            onVerticalDrag = { change, dragAmount ->
-                                                                change.consume()
-                                                                dragOffsetY += dragAmount
-
-                                                                val currentDragged = draggedIndex ?: return@detectVerticalDragGestures
-                                                                val layoutInfo = listState.layoutInfo
-                                                                val draggedItemInfo = layoutInfo.visibleItemsInfo.find { it.index == currentDragged }
-
-                                                                if (draggedItemInfo != null) {
-                                                                    val draggedHeight = draggedItemInfo.size
-                                                                    val centerOnScreen = initialItemOffset + dragOffsetY + (draggedHeight / 2f)
-
-                                                                    val target = layoutInfo.visibleItemsInfo.find {
-                                                                        it.index < exercises.size &&
-                                                                                centerOnScreen > it.offset &&
-                                                                                centerOnScreen < it.offset + it.size
-                                                                    }
-                                                                    if (target != null) {
-                                                                        targetIndex = target.index
-                                                                    }
-                                                                }
-                                                            }
-                                                        )
-                                                    }
-                                                    .padding(4.dp)
+                                                    .clickable(
+                                                        interactionSource = titleInteractionSource,
+                                                        indication = null,
+                                                        enabled = !isReordering
+                                                    ) { onExerciseClick(exercise.exerciseId) }
+                                                    .alpha(if (isTitlePressed && !isReordering) 0.4f else 1f)
                                             )
-                                            Spacer(Modifier.width(8.dp))
                                         }
 
-                                        val titleInteractionSource = remember { MutableInteractionSource() }
-                                        val isTitlePressed by titleInteractionSource.collectIsPressedAsState()
+                                        if (isReordering) {
+                                            val deleteExSource = remember { MutableInteractionSource() }
+                                            val isDeleteExPressed by deleteExSource.collectIsPressedAsState()
 
-                                        Text(
-                                            text = exercise.name,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier
-                                                .clickable(
-                                                    interactionSource = titleInteractionSource,
-                                                    indication = null,
-                                                    enabled = !isReordering
-                                                ) { onExerciseClick(exercise.exerciseId) }
-                                                .alpha(if (isTitlePressed && !isReordering) 0.4f else 1f)
-                                        )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .alpha(if (isDeleteExPressed) 0.4f else 1f)
+                                                    .clickable(
+                                                        interactionSource = deleteExSource,
+                                                        indication = null
+                                                    ) {
+                                                        exerciseToDelete = exercise
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(Icons.Filled.Delete, contentDescription = "Delete exercise", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                                            }
+                                        }
                                     }
 
                                     AnimatedVisibility(
@@ -365,6 +431,9 @@ fun WorkoutLoggingScreen(
                                             exercise = exercise,
                                             restSeconds = currentRestTime,
                                             onRestTimeClick = { activeExerciseForTimer = exercise },
+                                            onPlateCalculatorClick = { currentWeight ->
+                                                activeExerciseForPlates = Pair(exercise, currentWeight)
+                                            },
                                             onStartTimer = { seconds -> timerTotal = seconds; timerRemaining = seconds; isTimerRunning = true },
                                             onCancelTimer = { timerTotal = 0; timerRemaining = 0; isTimerRunning = false },
                                             onOpenSetType = { row -> activeSetRowForType = row }
@@ -414,6 +483,57 @@ fun WorkoutLoggingScreen(
         }
     }
 
+    if (showDiscardEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardEditDialog = false },
+            title = { Text("Discard edits?", color = MaterialTheme.colorScheme.onSurface) },
+            text = { Text("Are you sure you want to discard changes made to exercises?", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        exercises.clear()
+                        exercises.addAll(initialExercisesBackup)
+                        isReordering = false
+                        showDiscardEditDialog = false
+                    }
+                ) { Text("Discard", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardEditDialog = false }) {
+                    Text("Keep editing", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(8.dp)
+        )
+    }
+
+    if (exerciseToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { exerciseToDelete = null },
+            title = { Text("Remove exercise?", color = MaterialTheme.colorScheme.onSurface) },
+            text = { Text("Are you sure you want to remove \"${exerciseToDelete?.name}\" from this workout session?", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val ex = exerciseToDelete
+                        if (ex != null) {
+                            exercises.removeAll { it.workoutExerciseId == ex.workoutExerciseId }
+                        }
+                        exerciseToDelete = null
+                    }
+                ) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { exerciseToDelete = null }) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(8.dp)
+        )
+    }
+
     if (activeSetRowForType != null) {
         ModalBottomSheet(onDismissRequest = { activeSetRowForType = null }, sheetState = sheetState, containerColor = MaterialTheme.colorScheme.surface) {
             val row = activeSetRowForType!!
@@ -429,6 +549,17 @@ fun WorkoutLoggingScreen(
                 SetTypeOption("back_off", "Back-off set", "B", Color(0xFF34D399)) { updateType("back_off") }
             }
         }
+    }
+
+    if (activeExerciseForPlates != null) {
+        val (exercise, initialWeight) = activeExerciseForPlates!!
+        val plates = (viewModel.userPlatesState.value as? UiState.Success)?.data ?: emptyList()
+        PlateMathBottomSheet(
+            exerciseName = exercise.name,
+            initialWeight = initialWeight,
+            plates = plates,
+            onDismiss = { activeExerciseForPlates = null }
+        )
     }
 
     if (activeExerciseForTimer != null) {
@@ -520,12 +651,207 @@ fun WorkoutLoggingScreen(
     }
 }
 
+private fun formatPlateWeight(weight: Double): String {
+    return if (weight % 1.0 == 0.0) {
+        weight.toInt().toString()
+    } else {
+        String.format(Locale.US, "%.2f", weight).trimEnd('0').trimEnd('.')
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun PlateMathBottomSheet(
+    exerciseName: String,
+    initialWeight: Double,
+    plates: List<UserPlate>,
+    onDismiss: () -> Unit
+) {
+    val smallestPlate = plates.filter { it.count > 0 }.minByOrNull { it.weightKg }?.weightKg
+    val minStep = if (smallestPlate != null && smallestPlate > 0.0) smallestPlate else 1.25
+
+    var weightText by remember {
+        mutableStateOf(if (initialWeight > 0.0) formatPlateWeight(initialWeight) else "0")
+    }
+
+    val currentWeight = weightText.toDoubleOrNull() ?: 0.0
+
+    val breakdown = remember(currentWeight, plates) {
+        PlateCalculator.calculatePlatesPerSide(currentWeight, plates)
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(exerciseName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        val next = maxOf(0.0, currentWeight - minStep)
+                        weightText = formatPlateWeight(next)
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text("-${formatPlateWeight(minStep)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                }
+
+                Spacer(Modifier.width(12.dp))
+
+                OutlinedTextField(
+                    value = weightText,
+                    onValueChange = { weightText = it.filter { c -> c.isDigit() || c == '.' } },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.headlineMedium.copy(
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentBlue
+                    ),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.width(130.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
+                )
+
+                Spacer(Modifier.width(12.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        val next = currentWeight + minStep
+                        weightText = formatPlateWeight(next)
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text("+${formatPlateWeight(minStep)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Text(
+                    text = "Each side: ${String.format(Locale.US, "%.2f", breakdown.perSideWeight).replace(".00", "")} kg",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                )
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            if (breakdown.platesPerSide.isEmpty() && breakdown.extraSinglePlate == null) {
+                Text(
+                    text = "No plates needed (0 kg)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
+            } else {
+                if (breakdown.platesPerSide.isNotEmpty()) {
+                    Text(
+                        text = "Plates on each side:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        breakdown.platesPerSide.forEach { p ->
+                            Surface(
+                                shape = CircleShape,
+                                color = AccentBlue.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, AccentBlue),
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = formatPlateWeight(p),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentBlue
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (breakdown.extraSinglePlate != null) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "Extra single plate (Center / Pin):",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFFFC107),
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFFFFC107).copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, Color(0xFFFFC107)),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .align(Alignment.Start)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = formatPlateWeight(breakdown.extraSinglePlate),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFFC107)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (breakdown.remainder > 0.05) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "Missing ${formatPlateWeight(breakdown.remainder)} kg (out of smaller plates)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ExerciseLogContent(
     viewModel: WorkoutViewModel,
     exercise: ExerciseInfo,
     restSeconds: Int,
     onRestTimeClick: () -> Unit,
+    onPlateCalculatorClick: (Double) -> Unit,
     onStartTimer: (Int) -> Unit,
     onCancelTimer: () -> Unit,
     onOpenSetType: (SetRowState) -> Unit
@@ -618,21 +944,59 @@ private fun ExerciseLogContent(
         }
     }
 
+    fun resolveTargetPlateWeight(): Double {
+        val lastConfirmedWeight = sets.filter { it.confirmed }.lastOrNull()?.weight?.toDoubleOrNull()
+        if (lastConfirmedWeight != null && lastConfirmedWeight > 0.0) return lastConfirmedWeight
+
+        val activeRowWeight = sets.firstOrNull { !it.confirmed }?.weight?.toDoubleOrNull()
+        if (activeRowWeight != null && activeRowWeight > 0.0) return activeRowWeight
+
+        val firstRowFallback = sets.firstOrNull()?.fallbackWeight?.toDoubleOrNull()
+        if (firstRowFallback != null && firstRowFallback > 0.0) return firstRowFallback
+
+        val lastTrainingWeight = exercise.lastSets?.firstOrNull()?.weightKg
+        if (lastTrainingWeight != null && lastTrainingWeight > 0.0) return lastTrainingWeight
+
+        return 0.0
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         val timerInteractionSource = remember { MutableInteractionSource() }
         val isTimerPressed by timerInteractionSource.collectIsPressedAsState()
 
+        val plateInteractionSource = remember { MutableInteractionSource() }
+        val isPlatePressed by plateInteractionSource.collectIsPressedAsState()
+
         Row(
             modifier = Modifier
-                .padding(top = 4.dp, bottom = 12.dp)
-                .clickable(interactionSource = timerInteractionSource, indication = null) { onRestTimeClick() }
-                .alpha(if (isTimerPressed) 0.4f else 1f)
-                .padding(vertical = 4.dp, horizontal = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(top = 4.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Icon(Icons.Filled.Timer, contentDescription = "Rest", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(String.format(Locale.US, "%02d:%02d", restSeconds / 60, restSeconds % 60), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+            Row(
+                modifier = Modifier
+                    .clickable(interactionSource = timerInteractionSource, indication = null) { onRestTimeClick() }
+                    .alpha(if (isTimerPressed) 0.4f else 1f)
+                    .padding(vertical = 4.dp, horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.Timer, contentDescription = "Rest", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(String.format(Locale.US, "%02d:%02d", restSeconds / 60, restSeconds % 60), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+            }
+
+            Row(
+                modifier = Modifier
+                    .clickable(interactionSource = plateInteractionSource, indication = null) {
+                        onPlateCalculatorClick(resolveTargetPlateWeight())
+                    }
+                    .alpha(if (isPlatePressed) 0.4f else 1f)
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.Balance, contentDescription = "Plates", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+            }
         }
 
         Row(modifier = Modifier.fillMaxWidth()) {
