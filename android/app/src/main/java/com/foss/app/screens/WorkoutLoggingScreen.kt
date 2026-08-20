@@ -172,7 +172,7 @@ fun WorkoutLoggingScreen(
             showCancelDialog = true
         }
     }
-    
+
     val allActiveSets = exerciseSetsMap.values.flatten()
     val confirmedSetsCount = allActiveSets.count { it.confirmed }
     val totalVolumeKg = allActiveSets.filter { it.confirmed }.sumOf { row ->

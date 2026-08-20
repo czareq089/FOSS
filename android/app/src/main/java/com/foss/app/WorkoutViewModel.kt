@@ -41,6 +41,8 @@ class WorkoutViewModel : ViewModel() {
     var algorithmSettingsState = mutableStateOf<UiState<UserAlgorithmSettings>>(UiState.Idle)
         private set
 
+    var consistencyStatsState = mutableStateOf<UiState<ConsistencyStats>>(UiState.Loading)
+        private set
     fun loadRoutines() {
         viewModelScope.launch {
             if (routinesState.value !is UiState.Success) {
@@ -399,6 +401,17 @@ class WorkoutViewModel : ViewModel() {
             } else false
         } catch (e: Exception) {
             false
+        }
+    }
+
+    fun loadConsistencyStats() {
+        viewModelScope.launch {
+            try {
+                val stats = api.getConsistencyStats()
+                consistencyStatsState.value = UiState.Success(stats)
+            } catch (e: Exception) {
+                consistencyStatsState.value = UiState.Error(e.message ?: "Failed to load consistency stats")
+            }
         }
     }
 }

@@ -179,3 +179,7 @@ data class UpdateWorkoutDetailsReq(
     @SerializedName("workout_id") val workoutId: Int,
     @SerializedName("exercises") val exercises: List<WorkoutDetailExercise>
 )
+
+data class ConsistencyStats(
+    @SerializedName("workout_dates") val workoutDates: List<String> = emptyList()
+)

@@ -103,4 +103,7 @@ interface FossApi {
 
     @POST("/api/user/algorithms")
     suspend fun updateAlgorithmSettings(@Body settings: UserAlgorithmSettings): Response<Unit>
+
+    @GET("/api/training/stats/consistency")
+    suspend fun getConsistencyStats(): ConsistencyStats
 }

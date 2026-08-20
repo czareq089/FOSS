@@ -208,6 +208,10 @@ type UserAlgorithmSettings struct {
 	BackoffPercentage float64 `json:"backoff_percentage"`
 }
 
+type ConsistencyStatsResponse struct {
+	WorkoutDates []string `json:"workout_dates"` // format YYYY-MM-DD
+}
+
 // ==========================================
 // FUNKCJE OBSŁUGI API
 // ==========================================
@@ -1434,4 +1438,44 @@ func handleAPIUserAlgorithms(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func handleGetConsistencyStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	query := `
+       SELECT DISTINCT date(date)
+       FROM training_workouts
+       WHERE date >= date('now', '-120 days')
+       ORDER BY date(date) ASC
+    `
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var dates []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err == nil {
+			dates = append(dates, d)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ConsistencyStatsResponse{
+		WorkoutDates: dates,
+	})
 }
