@@ -4,174 +4,132 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FOSS</title>
-    <!-- PicoCSS jako baza resetująca -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <!-- HTMX -->
+    <link rel="stylesheet" href="/web/style.css">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <style>
-        :root {
-            --color-bg: #0b0d10;
-            --color-surface: #14171c;
-            --color-surface-2: #1c2027;
-            --color-border: #262b33;
-            --color-text: #e7e9ee;
-            --color-text-dim: #8b93a1;
-            --color-accent: #4f8cff;
-            --radius-md: .375rem;
-            --pico-background-color: var(--color-bg);
-            --pico-color: var(--color-text);
-            --pico-h1-color: #ffffff;
-            --pico-h2-color: #ffffff;
-            --pico-h3-color: #ffffff;
-            --pico-card-background-color: var(--color-surface);
-            --pico-border-color: var(--color-border);
-            --pico-primary: var(--color-accent);
-            --pico-primary-background: var(--color-accent);
-            --pico-primary-hover-background: #3a70db;
-            --pico-border-radius: var(--radius-md);
-            --pico-font-family-sans-serif: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            --pico-form-element-focus-color: var(--color-accent);
-            --pico-primary-focus: rgba(79, 140, 255, 0.25);
-        }
-
-        body {
-            padding-top: 2rem;
-            background-color: var(--color-bg);
-            color: var(--color-text);
-            font-family: var(--pico-font-family-sans-serif);
-        }
-
-        /* FIX: Sztywna siatka - 1 kolumna na mobile, 2 na PC */
-        .widget-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 1.5rem;
-            margin-top: 1.5rem;
-        }
-        @media (min-width: 768px) {
-            .widget-grid { grid-template-columns: repeat(2, 1fr); }
-        }
-
-        .widget {
-            background: var(--color-surface);
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius-md);
-            padding: 1.5rem;
-            box-shadow: none;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .widget h3 {
-            margin-bottom: 1.25rem;
-            font-size: 1.1rem;
-            font-weight: 500;
-            color: var(--color-text-dim);
-            text-align: center;
-        }
-
-        .widget .value {
-            font-size: 2.5rem;
-            font-weight: 600;
-            color: var(--color-text);
-            margin-top: auto;
-            margin-bottom: 0.5rem;
-            text-align: center;
-        }
-
-        /* FIX: Elastyczne przyciski zamiast zgniatającego się 'role="group"' */
-        .filter-group {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
-            width: 100%;
-        }
-        .filter-group button {
-            flex: 1;
-            padding: 0.25rem 0;
-            font-size: 0.85rem;
-            margin: 0;
-            white-space: nowrap;
-        }
-
-        progress {
-            --pico-progress-background-color: var(--color-surface-2);
-            --pico-progress-color: var(--color-accent);
-            margin-bottom: 1rem;
-            border-radius: 999px;
-            height: 0.5rem;
-        }
-
-        .macro-label {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.85rem;
-            margin-bottom: 0.3rem;
-            color: var(--color-text-dim);
-        }
-
-        .htmx-indicator { display: none; }
-        .htmx-request .htmx-indicator { display: inline-block; margin-left: 1rem; color: var(--color-text-dim); }
-
-        nav li strong { color: var(--color-text); font-weight: 600; letter-spacing: 0.05em;}
-        nav a.secondary { color: var(--color-text-dim) !important; font-weight: 500; transition: color 0.2s;}
-        nav a.secondary:hover { color: var(--color-text) !important; background: transparent !important;}
-        nav a.active { color: var(--color-accent) !important; }
-
-        .widget button.outline {
-            border-color: var(--color-border);
-            color: var(--color-text-dim);
-        }
-        .widget button.outline:hover {
-            border-color: var(--color-text-dim);
-            color: var(--color-text);
-            background: transparent;
-        }
-    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 <main class="container">
-    <nav>
-        <ul>
-            <li><strong>FOSS</strong></li>
-        </ul>
-        <ul>
-            <li><a href="/" class="secondary active">Dashboard</a></li>
-            <li><a href="/routines" class="secondary">Routines</a></li>
-            <li><a href="/diet" class="secondary">Diet</a></li>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <svg width="22" height="22" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20.57 14.86L22 13.43 20.57 12 17 15.57 8.43 7 12 3.43 10.57 2 9.14 3.43 7.71 2 5.57 4.14 4.14 2.71 2.71 4.14l1.43 1.43L2 7.71l1.43 1.43L2 10.57 3.43 12 7 8.43 15.57 17 12 20.57 13.43 22l1.43-1.43 1.43 1.43 2.14-2.14 1.43 1.43 1.43-1.43-1.43-1.43 1.43-1.43z"/>
+            </svg>
+            FOSS
+        </div>
+        <ul class="nav-links">
+            <li><a href="/" class="active">Dashboard</a></li>
+            <li><a href="/training">Training</a></li>
+            <li><a href="/diet">Diet</a></li>
         </ul>
     </nav>
 
-    <section style="margin-top: 2rem;">
-        <h2 style="font-size: 1.5rem; font-weight: 600;">Overview</h2>
-        <p style="color: var(--color-text-dim); font-size: 0.9rem;">Real-time widgets loaded asynchronously.</p>
-
+    <section id="dashboard">
         <div id="stats-grid" class="widget-grid">
+
             <div hx-get="/api/widgets/volume" hx-trigger="load" hx-swap="outerHTML">
-                <div class="widget" aria-busy="true">Loading volume stats...</div>
-            </div>
-            <div hx-get="/api/widgets/reps" hx-trigger="load" hx-swap="outerHTML">
-                <div class="widget" aria-busy="true">Loading reps stats...</div>
-            </div>
-            <div hx-get="/api/widgets/macros" hx-trigger="load" hx-swap="outerHTML">
-                <div class="widget" aria-busy="true">Loading nutrition data...</div>
-            </div>
-            <div hx-get="/api/widgets/top-exercises" hx-trigger="load" hx-swap="outerHTML">
-                <div class="widget" aria-busy="true">Loading top exercises...</div>
+                <div class="widget"><div style="color: var(--color-text-dim);">Loading volume...</div></div>
             </div>
 
-            <!-- NOWE WIDŻETY: -->
+            <div hx-get="/api/widgets/reps" hx-trigger="load" hx-swap="outerHTML">
+                <div class="widget"><div style="color: var(--color-text-dim);">Loading reps...</div></div>
+            </div>
+
+            <div class="widget col-span-2">
+                <div class="widget-header">
+                    <span class="widget-title">Trend tonażu (ostatnie sesje)</span>
+                    <span style="font-size: 0.75rem; color: var(--color-success); font-weight: 600;">● Active</span>
+                </div>
+                <div style="height: 120px; width: 100%;">
+                    <canvas id="volumeChart"></canvas>
+                </div>
+            </div>
+
+            <div class="col-span-2" hx-get="/api/widgets/top-exercises" hx-trigger="load" hx-swap="outerHTML">
+                <div class="widget"><div style="color: var(--color-text-dim);">Loading top exercises...</div></div>
+            </div>
+
             <div hx-get="/api/widgets/biggest-progress" hx-trigger="load" hx-swap="outerHTML">
-                <div class="widget" aria-busy="true">Loading progress data...</div>
+                <div class="widget"><div style="color: var(--color-text-dim);">Loading progress...</div></div>
             </div>
+
             <div hx-get="/api/widgets/overall-progress" hx-trigger="load" hx-swap="outerHTML">
-                <div class="widget" aria-busy="true">Loading overall trend...</div>
+                <div class="widget"><div style="color: var(--color-text-dim);">Loading consistency...</div></div>
             </div>
-            <div hx-get="/api/widgets/macro-deficit" hx-trigger="load" hx-swap="outerHTML">
-                <div class="widget" aria-busy="true">Loading macro deficit...</div>
+
+            <div class="col-span-2" hx-get="/api/widgets/macros" hx-trigger="load" hx-swap="outerHTML">
+                <div class="widget"><div style="color: var(--color-text-dim);">Loading nutrition...</div></div>
             </div>
+
+            <div class="col-span-2" hx-get="/api/widgets/macro-deficit" hx-trigger="load" hx-swap="outerHTML">
+                <div class="widget"><div style="color: var(--color-text-dim);">Loading deficit...</div></div>
+            </div>
+
         </div>
     </section>
 </main>
+
+<script>
+    document.addEventListener("DOMContentLoaded", async () => {
+        const canvas = document.getElementById('volumeChart');
+        if (!canvas) return;
+
+        try {
+            const res = await fetch('/api/widgets/volume-history');
+            const data = await res.json();
+
+            const labels = (data.labels && data.labels.length > 0) ? data.labels : ['No workouts logged.'];
+            const chartData = (data.data && data.data.length > 0) ? data.data : [0];
+
+            const ctx = canvas.getContext('2d');
+            const gradient = ctx.createLinearGradient(0, 0, 0, 120);
+            gradient.addColorStop(0, 'rgba(79, 140, 255, 0.35)');
+            gradient.addColorStop(1, 'rgba(79, 140, 255, 0.0)');
+
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Volume (kg)',
+                        data: chartData,
+                        borderColor: '#4f8cff',
+                        backgroundColor: gradient,
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.2,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#4f8cff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => ` ${context.parsed.y.toFixed(1)} kg`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.04)' },
+                            ticks: { color: '#8b93a1', font: { size: 10 } }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(255, 255, 255, 0.04)' },
+                            ticks: { color: '#8b93a1', font: { size: 10 } }
+                        }
+                    }
+                }
+            });
+        } catch (err) {
+            console.error('Error while loading the chart:', err);
+        }
+    });
+</script>
 </body>
 </html>

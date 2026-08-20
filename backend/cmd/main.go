@@ -10,10 +10,13 @@ const dbPath = "database/foss.db"
 
 func main() {
 	// ==========================================
-	// 1. WEB HANDLERS (Dashboard HTML / HTMX)
+	// 1. WEB HANDLERS (Dashboard & Training HTMX)
 	// ==========================================
 	http.HandleFunc("/", handleWebIndex)
-	http.HandleFunc("/api/dashboard/volume", handleWebDashboardVolume)
+	http.HandleFunc("/training", handleWebTrainingPage) // zmienione z /routines
+	http.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
+
+	// Widżety Dashboardu
 	http.HandleFunc("/api/widgets/volume", handleWidgetVolume)
 	http.HandleFunc("/api/widgets/reps", handleWidgetReps)
 	http.HandleFunc("/api/widgets/macros", handleWidgetMacros)
@@ -21,6 +24,11 @@ func main() {
 	http.HandleFunc("/api/widgets/biggest-progress", handleWidgetBiggestProgress)
 	http.HandleFunc("/api/widgets/overall-progress", handleWidgetOverallProgress)
 	http.HandleFunc("/api/widgets/macro-deficit", handleWidgetMacroDeficit)
+	http.HandleFunc("/api/widgets/volume-history", handleWidgetVolumeHistory)
+
+	// Web Training HTMX Endpoints
+	http.HandleFunc("/web/training/list", handleWebTrainingList)
+	http.HandleFunc("/web/training/detail", handleWebTrainingDetail)
 
 	// ==========================================
 	// 2. API HANDLERS (Aplikacja Mobilna JSON)

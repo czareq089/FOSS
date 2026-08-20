@@ -588,7 +588,7 @@ fun WorkoutLoggingScreen(
             } else {
                 Text("No active workout.", modifier = Modifier.align(Alignment.Center))
             }
-            
+
             AnimatedVisibility(
                 visible = prBannerText != null,
                 enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
