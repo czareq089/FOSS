@@ -24,38 +24,63 @@
     </nav>
 
     <section>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
             <div>
-                <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 0.25rem;">Workout Routines</h2>
-                <p style="color: var(--color-text-dim); font-size: 0.875rem;">Manage and inspect your training templates.</p>
+                <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin: 0 0 0.25rem 0;">Training Hub</h2>
+                <p style="color: var(--color-text-dim); font-size: 0.875rem; margin: 0;">Manage your routines and inspect or edit past workouts.</p>
             </div>
-            <button class="btn btn-primary" onclick="document.getElementById('create-modal').showModal()">
-                + New Routine
-            </button>
+
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="segmented-control" id="view-toggle">
+                    <button class="segmented-btn active" onclick="switchTab(this)" hx-get="/web/training/list" hx-target="#training-view-container">Routines</button>
+                    <button class="segmented-btn" onclick="switchTab(this)" hx-get="/web/training/workouts/tab" hx-target="#training-view-container">Logged Workouts</button>
+                </div>
+
+                <button class="btn btn-primary" id="btn-create-routine" onclick="document.getElementById('create-modal').showModal()">
+                    + New Routine
+                </button>
+            </div>
         </div>
 
-        <div id="routines-container" hx-get="/web/training/list" hx-trigger="load" hx-swap="innerHTML">
-            <div style="text-align: center; color: var(--color-text-dim); padding: 2rem;">Loading training routines...</div>
+        <div id="training-view-container" hx-get="/web/training/list" hx-trigger="load" hx-swap="innerHTML">
+            <div style="text-align: center; color: var(--color-text-dim); padding: 2rem;">Loading data...</div>
         </div>
     </section>
 
+    <!-- Modal: Podgląd Rutyny (Read-only) -->
     <dialog id="routine-modal">
         <div class="modal-box">
             <div id="routine-detail-modal-content">
                 <div style="text-align: center; color: var(--color-text-dim);">Loading details...</div>
             </div>
-            <div style="display: flex; justify-content: flex-end; margin-top: 1.5rem;">
-                <button class="btn btn-secondary" onclick="document.getElementById('routine-modal').close()">Close</button>
+        </div>
+    </dialog>
+
+    <!-- Modal: Edycja Rutyny -->
+    <dialog id="routine-edit-modal">
+        <div class="modal-box" style="max-width: 650px;">
+            <div id="routine-edit-modal-content">
+                <div style="text-align: center; color: var(--color-text-dim);">Loading editor...</div>
             </div>
         </div>
     </dialog>
 
+    <!-- Modal: Edycja Treningu -->
+    <dialog id="workout-edit-modal">
+        <div class="modal-box" style="max-width: 650px;">
+            <div id="workout-edit-modal-content">
+                <div style="text-align: center; color: var(--color-text-dim);">Loading workout session...</div>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Modal: Tworzenie Rutyny -->
     <dialog id="create-modal">
         <div class="modal-box">
             <div class="modal-header">
                 <h3 style="margin: 0; font-size: 1.2rem; color: #fff;">Create Routine</h3>
             </div>
-            <form hx-post="/web/training/list" hx-target="#routines-container" hx-on::after-request="document.getElementById('create-modal').close(); this.reset();">
+            <form hx-post="/web/training/list" hx-target="#training-view-container" hx-on::after-request="document.getElementById('create-modal').close(); this.reset();">
                 <div class="form-group">
                     <label for="name">Routine Name</label>
                     <input type="text" id="name" name="name" class="form-input" placeholder="e.g. Push Day, Upper A" required>
@@ -68,5 +93,98 @@
         </div>
     </dialog>
 </main>
+
+<script>
+    function switchTab(btn) {
+        document.querySelectorAll('#view-toggle .segmented-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const createBtn = document.getElementById('btn-create-routine');
+        if (createBtn) {
+            createBtn.style.display = btn.innerText.includes('Routines') ? 'inline-block' : 'none';
+        }
+    }
+
+    function addSetBadge(cardIdx, exId) {
+        const container = document.getElementById(`sets-container-${cardIdx}`);
+        if (!container) return;
+        const currentCount = container.children.length + 1;
+
+        const badge = document.createElement('div');
+        badge.className = 'set-badge';
+        badge.style = 'display: inline-flex; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 4px; padding: 2px 6px;';
+        badge.innerHTML = `
+            <span style="font-size: 0.75rem; margin-right: 4px; color: var(--color-text-dim);">S${currentCount}:</span>
+            <select name="set_types_${exId}" style="background: transparent; border: none; color: #fff; font-size: 0.75rem;">
+                <option value="standard" selected>Standard</option>
+                <option value="warmup">Warmup</option>
+                <option value="failure">Failure</option>
+                <option value="drop">Drop</option>
+                <option value="back_off">Back-off</option>
+            </select>
+        `;
+        container.appendChild(badge);
+    }
+
+    function addExerciseToRoutineUI() {
+        const select = document.getElementById('new-ex-select');
+        const exId = select.value;
+        if (!exId) return;
+        const exName = select.options[select.selectedIndex].text;
+
+        const list = document.getElementById('routine-exercises-list');
+        const nextIdx = list.children.length;
+
+        const card = document.createElement('div');
+        card.className = 'routine-ex-card';
+        card.id = `ex-card-${nextIdx}`;
+        card.style = 'background: var(--color-surface-2); padding: 12px; border-radius: var(--radius-md); margin-bottom: 12px; border: 1px solid var(--color-border);';
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div>
+                    <strong style="color: #fff;">${nextIdx + 1}. ${exName}</strong>
+                </div>
+                <button type="button" class="btn-danger-outline" style="padding: 2px 8px; font-size: 0.75rem;" onclick="document.getElementById('ex-card-${nextIdx}').remove()">Remove</button>
+            </div>
+            <input type="hidden" name="exercise_ids" value="${exId}">
+
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" id="sets-container-${nextIdx}">
+                <div class="set-badge" style="display: inline-flex; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 4px; padding: 2px 6px;">
+                    <span style="font-size: 0.75rem; margin-right: 4px; color: var(--color-text-dim);">S1:</span>
+                    <select name="set_types_${exId}" style="background: transparent; border: none; color: #fff; font-size: 0.75rem;">
+                        <option value="standard" selected>Standard</option>
+                        <option value="warmup">Warmup</option>
+                        <option value="failure">Failure</option>
+                        <option value="drop">Drop</option>
+                        <option value="back_off">Back-off</option>
+                    </select>
+                </div>
+                <div class="set-badge" style="display: inline-flex; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 4px; padding: 2px 6px;">
+                    <span style="font-size: 0.75rem; margin-right: 4px; color: var(--color-text-dim);">S2:</span>
+                    <select name="set_types_${exId}" style="background: transparent; border: none; color: #fff; font-size: 0.75rem;">
+                        <option value="standard" selected>Standard</option>
+                        <option value="warmup">Warmup</option>
+                        <option value="failure">Failure</option>
+                        <option value="drop">Drop</option>
+                        <option value="back_off">Back-off</option>
+                    </select>
+                </div>
+                <div class="set-badge" style="display: inline-flex; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 4px; padding: 2px 6px;">
+                    <span style="font-size: 0.75rem; margin-right: 4px; color: var(--color-text-dim);">S3:</span>
+                    <select name="set_types_${exId}" style="background: transparent; border: none; color: #fff; font-size: 0.75rem;">
+                        <option value="standard" selected>Standard</option>
+                        <option value="warmup">Warmup</option>
+                        <option value="failure">Failure</option>
+                        <option value="drop">Drop</option>
+                        <option value="back_off">Back-off</option>
+                    </select>
+                </div>
+            </div>
+            <button type="button" class="btn btn-secondary" style="margin-top: 8px; padding: 2px 8px; font-size: 0.75rem;" onclick="addSetBadge(${nextIdx}, ${exId})">+ Add Set</button>
+        `;
+        list.appendChild(card);
+        select.value = '';
+    }
+</script>
 </body>
 </html>

@@ -29,6 +29,11 @@ func main() {
 	// Web Training HTMX Endpoints
 	http.HandleFunc("/web/training/list", handleWebTrainingList)
 	http.HandleFunc("/web/training/detail", handleWebTrainingDetail)
+	http.HandleFunc("/web/training/routine/edit", handleWebRoutineEditModal)
+	http.HandleFunc("/web/training/routine/save", handleWebRoutineSave)
+	http.HandleFunc("/web/training/workouts/tab", handleWebWorkoutsTab)
+	http.HandleFunc("/web/training/workouts/edit", handleWebWorkoutEditModal)
+	http.HandleFunc("/web/training/workouts/save", handleWebWorkoutSave)
 
 	// ==========================================
 	// 2. API HANDLERS (Aplikacja Mobilna JSON)
