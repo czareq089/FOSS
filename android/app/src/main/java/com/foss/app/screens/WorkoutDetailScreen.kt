@@ -24,7 +24,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.formatUtcToLocal
 import com.foss.app.models.WorkoutDetailExercise
 import com.foss.app.models.WorkoutDetailSet
@@ -57,7 +57,7 @@ class EditableDetailExerciseState(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkoutDetailScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     workoutId: Int,
     startInEditMode: Boolean = false,
     onBack: () -> Unit

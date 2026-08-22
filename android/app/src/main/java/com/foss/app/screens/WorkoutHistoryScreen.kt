@@ -20,14 +20,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.formatUtcToLocal
 import com.foss.app.models.WorkoutSummary
 import kotlinx.coroutines.launch
 
 @Composable
 fun WorkoutHistoryScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     onWorkoutSelected: (WorkoutSummary) -> Unit,
     onWorkoutEdit: (WorkoutSummary) -> Unit
 ) {

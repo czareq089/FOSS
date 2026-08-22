@@ -21,7 +21,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.models.ExerciseDetailAnalytics
 import com.foss.app.models.ExerciseHistoryPoint
 import com.foss.app.ui.theme.AccentBlue
@@ -52,7 +52,7 @@ private val RANGES = listOf("1m" to "1M", "3m" to "3M", "6m" to "6M", "1y" to "1
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExerciseDetailScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     exerciseId: Int,
     onBack: () -> Unit
 ) {

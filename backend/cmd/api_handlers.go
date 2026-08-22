@@ -213,6 +213,67 @@ type ConsistencyStatsResponse struct {
 }
 
 // ==========================================
+// MODUŁ DIETY (STRUKTURY I HANDLERY JSON)
+// ==========================================
+
+type DietProductItem struct {
+	ID            int      `json:"id"`
+	Name          string   `json:"name"`
+	Brand         *string  `json:"brand"`
+	Barcode       *string  `json:"barcode"`
+	PackageWeight *float64 `json:"package_weight"`
+	ServingSize   *float64 `json:"serving_size"`
+	Kcal          *float64 `json:"kcal"`
+	Protein       *float64 `json:"protein"`
+	Fat           *float64 `json:"fat"`
+	Carbs         *float64 `json:"carbs"`
+}
+
+type CreateProductReq struct {
+	Name          string   `json:"name"`
+	Brand         *string  `json:"brand"`
+	Barcode       *string  `json:"barcode"`
+	PackageWeight *float64 `json:"package_weight"`
+	ServingSize   *float64 `json:"serving_size"`
+	Kcal          *float64 `json:"kcal"`
+	Protein       *float64 `json:"protein"`
+	Fat           *float64 `json:"fat"`
+	Carbs         *float64 `json:"carbs"`
+}
+
+type LogDietReq struct {
+	UserID        int      `json:"user_id"`
+	ProductID     int      `json:"product_id"`
+	AmountG       float64  `json:"amount"`
+	ServingsCount *float64 `json:"servings_count"`
+}
+
+type DietLogItem struct {
+	ID            int      `json:"id"`
+	ProductID     int      `json:"product_id"`
+	Name          string   `json:"name"`
+	AmountG       float64  `json:"amount"`
+	ServingsCount *float64 `json:"servings_count"`
+	Kcal          float64  `json:"kcal"`
+	Protein       float64  `json:"protein"`
+	Fat           float64  `json:"fat"`
+	Carbs         float64  `json:"carbs"`
+	LoggedAt      string   `json:"logged_at"`
+}
+
+type DailyDietSummaryResp struct {
+	ConsumedKcal float64       `json:"consumed_kcal"`
+	ConsumedP    float64       `json:"consumed_p"`
+	ConsumedF    float64       `json:"consumed_f"`
+	ConsumedC    float64       `json:"consumed_c"`
+	TargetKcal   float64       `json:"target_kcal"`
+	TargetP      float64       `json:"target_p"`
+	TargetF      float64       `json:"target_f"`
+	TargetC      float64       `json:"target_c"`
+	Logs         []DietLogItem `json:"logs"`
+}
+
+// ==========================================
 // FUNKCJE OBSŁUGI API
 // ==========================================
 
@@ -1478,4 +1539,226 @@ func handleGetConsistencyStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ConsistencyStatsResponse{
 		WorkoutDates: dates,
 	})
+}
+
+func handleAPIDietProducts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`
+		SELECT id, name, brand, barcode, package_weight, serving_size, kcal, protein, fat, carbs 
+		FROM diet_products ORDER BY name ASC`)
+	if err != nil {
+		http.Error(w, "Failed to fetch products", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	products := []DietProductItem{}
+	for rows.Next() {
+		var p DietProductItem
+		if err := rows.Scan(&p.ID, &p.Name, &p.Brand, &p.Barcode, &p.PackageWeight, &p.ServingSize, &p.Kcal, &p.Protein, &p.Fat, &p.Carbs); err == nil {
+			products = append(products, p)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(products)
+}
+
+// 2. Tworzenie nowego produktu w katalogu
+func handleAPIDietProductCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req CreateProductReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid body", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "Product name cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	res, err := db.Exec(`
+		INSERT INTO diet_products (name, brand, barcode, package_weight, serving_size, kcal, protein, fat, carbs)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		strings.TrimSpace(req.Name), req.Brand, req.Barcode, req.PackageWeight, req.ServingSize, req.Kcal, req.Protein, req.Fat, req.Carbs)
+
+	if err != nil {
+		http.Error(w, "Failed to save product", http.StatusInternalServerError)
+		return
+	}
+
+	newID, _ := res.LastInsertId()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(DietProductItem{
+		ID:            int(newID),
+		Name:          req.Name,
+		Brand:         req.Brand,
+		Barcode:       req.Barcode,
+		PackageWeight: req.PackageWeight,
+		ServingSize:   req.ServingSize,
+		Kcal:          req.Kcal,
+		Protein:       req.Protein,
+		Fat:           req.Fat,
+		Carbs:         req.Carbs,
+	})
+}
+
+// 3. Podsumowanie dnia i lista logów
+func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+	dateStr := r.URL.Query().Get("date")
+	if dateStr == "" {
+		dateStr = "now"
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var resp DailyDietSummaryResp
+	resp.TargetKcal = 2700.0
+	resp.TargetP = 140.0
+	resp.TargetF = 75.0
+	resp.TargetC = 350.0
+	resp.Logs = []DietLogItem{}
+
+	// Pobranie celów użytkownika z user_diet_settings
+	_ = db.QueryRow(`
+		SELECT (2400.0 + surplus_kcal), (target_p_per_kg * target_weight_kg), (target_f_per_kg * target_weight_kg), 350.0 
+		FROM user_diet_settings WHERE user_id = ?`, userID).
+		Scan(&resp.TargetKcal, &resp.TargetP, &resp.TargetF, &resp.TargetC)
+
+	rows, err := db.Query(`
+		SELECT 
+			l.id, l.product_id, p.name, l.amount,
+			COALESCE(p.kcal, 0) * (l.amount / 100.0) as calculated_kcal,
+			COALESCE(p.protein, 0) * (l.amount / 100.0) as calculated_p,
+			COALESCE(p.fat, 0) * (l.amount / 100.0) as calculated_f,
+			COALESCE(p.carbs, 0) * (l.amount / 100.0) as calculated_c,
+			strftime('%H:%M', l.logged_at) as log_time,
+			p.serving_size
+		FROM diet_logs l
+		JOIN diet_products p ON p.id = l.product_id
+		WHERE l.user_id = ? AND date(l.logged_at) = date(?)
+		ORDER BY l.logged_at DESC, l.id DESC`, userID, dateStr)
+
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var log DietLogItem
+			var servSize *float64
+			if err := rows.Scan(&log.ID, &log.ProductID, &log.Name, &log.AmountG, &log.Kcal, &log.Protein, &log.Fat, &log.Carbs, &log.LoggedAt, &servSize); err == nil {
+				if servSize != nil && *servSize > 0 {
+					val := log.AmountG / *servSize
+					log.ServingsCount = &val
+				}
+				resp.ConsumedKcal += log.Kcal
+				resp.ConsumedP += log.Protein
+				resp.ConsumedF += log.Fat
+				resp.ConsumedC += log.Carbs
+				resp.Logs = append(resp.Logs, log)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// 4. Logowanie posiłku
+func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req LogDietReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == 0 {
+		req.UserID = 1
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`INSERT INTO diet_logs (user_id, product_id, amount) VALUES (?, ?, ?)`,
+		req.UserID, req.ProductID, req.AmountG)
+	if err != nil {
+		http.Error(w, "Failed to log food", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+// 5. Usuwanie wpisu z logu
+func handleAPIDietLogDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	logID := r.URL.Query().Get("id")
+	if logID == "" {
+		http.Error(w, "Missing id", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`DELETE FROM diet_logs WHERE id = ?`, logID)
+	if err != nil {
+		http.Error(w, "Failed to delete log", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

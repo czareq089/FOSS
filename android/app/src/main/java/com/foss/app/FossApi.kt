@@ -106,4 +106,22 @@ interface FossApi {
 
     @GET("/api/training/stats/consistency")
     suspend fun getConsistencyStats(): ConsistencyStats
+
+    @GET("/api/diet/products")
+    suspend fun getDietProducts(): Response<List<DietProduct>>
+
+    @POST("/api/diet/products/create")
+    suspend fun createDietProduct(@Body request: CreateProductRequest): Response<DietProduct>
+
+    @GET("/api/diet/summary")
+    suspend fun getDietDaySummary(
+        @Query("date") date: String = "now",
+        @Query("user_id") userId: Int = 1
+    ): Response<DailyDietSummary>
+
+    @POST("/api/diet/log")
+    suspend fun logDietFood(@Body request: LogDietRequest): Response<Unit>
+
+    @DELETE("/api/diet/log/delete")
+    suspend fun deleteDietLog(@Query("id") logId: Int): Response<Unit>
 }

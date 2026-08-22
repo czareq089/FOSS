@@ -22,7 +22,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.ui.theme.AccentBlue
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -31,7 +31,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileSettingsScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     onNavigateToEquipment: () -> Unit,
     onNavigateToAutomation: () -> Unit,
     onBack: () -> Unit

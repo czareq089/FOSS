@@ -38,7 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.models.ReorderPosition
 import com.foss.app.models.RoutineExercisePreview
 import com.foss.app.models.RoutineSet
@@ -61,7 +61,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoutineDetailScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     routineId: Int,
     startInEditMode: Boolean = false,
     onStartWorkout: (workoutId: Int) -> Unit,
@@ -444,7 +444,7 @@ private fun ExercisePreviewCard(
 @Composable
 private fun ReorderableExerciseList(
     routineId: Int,
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     exercises: androidx.compose.runtime.snapshots.SnapshotStateList<RoutineExercisePreview>,
     onAddExerciseClick: () -> Unit,
     onOpenSetType: (RoutineExercisePreview, Int) -> Unit

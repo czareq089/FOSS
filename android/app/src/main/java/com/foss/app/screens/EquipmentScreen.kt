@@ -24,7 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.models.UserPlate
 import com.foss.app.ui.theme.AccentBlue
 import kotlinx.coroutines.launch
@@ -33,7 +33,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EquipmentScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     onBack: () -> Unit
 ) {
     LaunchedEffect(Unit) {

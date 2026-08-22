@@ -18,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.models.UserAlgorithmSettings
 import com.foss.app.ui.theme.AccentBlue
 import kotlinx.coroutines.launch
@@ -27,7 +27,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AutomationSettingsScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     onBack: () -> Unit
 ) {
     LaunchedEffect(Unit) {

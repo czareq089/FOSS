@@ -14,7 +14,7 @@ sealed class UiState<out T> {
     data class Error(val message: String) : UiState<Nothing>()
 }
 
-class WorkoutViewModel : ViewModel() {
+class AppViewModel : ViewModel() {
 
     private val api = NetworkModule.api
     private val currentUserId = 1
@@ -42,6 +42,11 @@ class WorkoutViewModel : ViewModel() {
         private set
 
     var consistencyStatsState = mutableStateOf<UiState<ConsistencyStats>>(UiState.Loading)
+        private set
+
+    var dietSummaryState = mutableStateOf<UiState<DailyDietSummary>>(UiState.Idle)
+        private set
+    var dietProductsState = mutableStateOf<UiState<List<DietProduct>>>(UiState.Idle)
         private set
     fun loadRoutines() {
         viewModelScope.launch {
@@ -413,5 +418,51 @@ class WorkoutViewModel : ViewModel() {
                 consistencyStatsState.value = UiState.Error(e.message ?: "Failed to load consistency stats")
             }
         }
+    }
+
+    fun loadDietData(date: String = "now") {
+        viewModelScope.launch {
+            dietSummaryState.value = UiState.Loading
+            dietProductsState.value = UiState.Loading
+            try {
+                val sumRes = api.getDietDaySummary(date, currentUserId)
+                dietSummaryState.value = if (sumRes.isSuccessful && sumRes.body() != null) {
+                    UiState.Success(sumRes.body()!!)
+                } else UiState.Error("Failed to load diet summary")
+
+                val prodRes = api.getDietProducts()
+                dietProductsState.value = if (prodRes.isSuccessful && prodRes.body() != null) {
+                    UiState.Success(prodRes.body()!!)
+                } else UiState.Error("Failed to load products")
+            } catch (e: Exception) {
+                dietSummaryState.value = UiState.Error(e.message ?: "Connection error")
+            }
+        }
+    }
+
+    suspend fun logFood(productId: Int, amountG: Double): Boolean {
+        return try {
+            val ok = api.logDietFood(LogDietRequest(currentUserId, productId, amountG)).isSuccessful
+            if (ok) loadDietData()
+            ok
+        } catch (e: Exception) { false }
+    }
+
+    suspend fun createProduct(req: CreateProductRequest): DietProduct? {
+        return try {
+            val res = api.createDietProduct(req)
+            if (res.isSuccessful && res.body() != null) {
+                loadDietData()
+                res.body()
+            } else null
+        } catch (e: Exception) { null }
+    }
+
+    suspend fun deleteFoodLog(logId: Int): Boolean {
+        return try {
+            val ok = api.deleteDietLog(logId).isSuccessful
+            if (ok) loadDietData()
+            ok
+        } catch (e: Exception) { false }
     }
 }

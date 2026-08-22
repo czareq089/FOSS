@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.models.ExerciseInfo
 import com.foss.app.models.PlateCalculator
 import com.foss.app.models.ReorderPosition
@@ -81,7 +81,7 @@ class SetRowState(initialSetNumber: Int) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun WorkoutLoggingScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     workoutId: Int,
     onAddExerciseClick: () -> Unit,
     onExerciseClick: (Int) -> Unit,
@@ -1028,7 +1028,7 @@ private fun PlateMathBottomSheet(
 
 @Composable
 private fun ExerciseLogContent(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     exercise: ExerciseInfo,
     restSeconds: Int,
     onRestTimeClick: () -> Unit,

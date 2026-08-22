@@ -21,14 +21,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.models.Routine
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoutinesScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     onRoutineSelected: (Routine) -> Unit,
     onRoutineEdit: (Routine) -> Unit,
     showTopBar: Boolean = true
