@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun FossApp() {
     val navController = rememberNavController()
-    val viewModel: WorkoutViewModel = viewModel()
+    val viewModel: AppViewModel = viewModel()
 
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route

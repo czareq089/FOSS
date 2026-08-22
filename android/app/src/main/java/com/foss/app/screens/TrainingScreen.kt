@@ -18,7 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.models.Routine
 import com.foss.app.models.WorkoutSummary
 
@@ -26,7 +26,7 @@ private val TABS = listOf("Routines", "Workouts")
 
 @Composable
 fun TrainingScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     onRoutineSelected: (Routine) -> Unit,
     onRoutineEdit: (Routine) -> Unit,
     onWorkoutSelected: (WorkoutSummary) -> Unit,

@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
-import com.foss.app.WorkoutViewModel
+import com.foss.app.AppViewModel
 import com.foss.app.components.ConsistencyHeatmapCard
 import com.foss.app.components.VolumeWidgetCard
 import com.foss.app.ui.theme.AccentBlue
@@ -21,7 +21,7 @@ import com.foss.app.ui.theme.AccentBlue
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
-    viewModel: WorkoutViewModel,
+    viewModel: AppViewModel,
     onProfileClick: () -> Unit
 ) {
     var selectedRange by remember { mutableStateOf("7d") }
