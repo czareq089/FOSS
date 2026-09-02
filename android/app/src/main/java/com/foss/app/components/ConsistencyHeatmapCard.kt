@@ -20,14 +20,19 @@ import java.time.temporal.ChronoUnit
 
 @Composable
 fun ConsistencyHeatmapCard(
-    workoutDatesStrings: List<String>,
+    title: String = "Trainings",
+    datesStrings: List<String>,
+    activeColor: Color = AccentBlue,
+    streakUnit: String = "wk",
+    streakUnitPlural: String = "wks",
+    emptyText: String = "No logs yet",
     modifier: Modifier = Modifier
 ) {
     val formatter = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd") }
     val today = remember { LocalDate.now() }
 
-    val workoutDates = remember(workoutDatesStrings) {
-        workoutDatesStrings.mapNotNull {
+    val loggedDates = remember(datesStrings) {
+        datesStrings.mapNotNull {
             try {
                 LocalDate.parse(it.take(10), formatter)
             } catch (e: Exception) {
@@ -36,12 +41,12 @@ fun ConsistencyHeatmapCard(
         }.toSet()
     }
 
-    val lastWorkoutDate = remember(workoutDates) { workoutDates.filter { !it.isAfter(today) }.maxOrNull() }
-    val daysAgoText = remember(lastWorkoutDate) {
-        if (lastWorkoutDate == null) {
-            "No workouts yet"
+    val lastDate = remember(loggedDates) { loggedDates.filter { !it.isAfter(today) }.maxOrNull() }
+    val daysAgoText = remember(lastDate) {
+        if (lastDate == null) {
+            emptyText
         } else {
-            val diff = ChronoUnit.DAYS.between(lastWorkoutDate, today)
+            val diff = ChronoUnit.DAYS.between(lastDate, today)
             when (diff) {
                 0L -> "Today"
                 1L -> "Yesterday"
@@ -50,11 +55,11 @@ fun ConsistencyHeatmapCard(
         }
     }
 
-    val streakWeeks = remember(workoutDates) {
+    val streakWeeks = remember(loggedDates) {
         var streak = 0
         var currentMonday = today.with(DayOfWeek.MONDAY)
 
-        val currentWeekHasWorkout = (0..6).any { currentMonday.plusDays(it.toLong()) in workoutDates }
+        val currentWeekHasWorkout = (0..6).any { currentMonday.plusDays(it.toLong()) in loggedDates }
         if (currentWeekHasWorkout) {
             streak++
             currentMonday = currentMonday.minusWeeks(1)
@@ -63,7 +68,7 @@ fun ConsistencyHeatmapCard(
         }
 
         while (true) {
-            val hasWorkout = (0..6).any { currentMonday.plusDays(it.toLong()) in workoutDates }
+            val hasWorkout = (0..6).any { currentMonday.plusDays(it.toLong()) in loggedDates }
             if (hasWorkout) {
                 streak++
                 currentMonday = currentMonday.minusWeeks(1)
@@ -97,7 +102,7 @@ fun ConsistencyHeatmapCard(
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
-                        text = "Consistency",
+                        text = title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -115,10 +120,10 @@ fun ConsistencyHeatmapCard(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                 ) {
                     Text(
-                        text = "Streak: $streakWeeks ${if (streakWeeks == 1) "wk" else "wks"}",
+                        text = "Streak: $streakWeeks ${if (streakWeeks == 1) streakUnit else streakUnitPlural}",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (streakWeeks > 0) AccentBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (streakWeeks > 0) activeColor else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
@@ -145,11 +150,11 @@ fun ConsistencyHeatmapCard(
                             for (d in 0..6) {
                                 val dayDate = weekStart.plusDays(d.toLong())
                                 val isFuture = dayDate.isAfter(today)
-                                val hasWorkout = dayDate in workoutDates
+                                val isLogged = dayDate in loggedDates
 
                                 val cellColor = when {
                                     isFuture -> Color.Transparent
-                                    hasWorkout -> AccentBlue
+                                    isLogged -> activeColor
                                     else -> MaterialTheme.colorScheme.surfaceVariant
                                 }
 

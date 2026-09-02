@@ -209,12 +209,23 @@ type UserAlgorithmSettings struct {
 }
 
 type ConsistencyStatsResponse struct {
-	WorkoutDates []string `json:"workout_dates"` // format YYYY-MM-DD
+	WorkoutDates []string `json:"workout_dates"`
 }
 
 // ==========================================
 // MODUŁ DIETY (STRUKTURY I HANDLERY JSON)
 // ==========================================
+
+type UserDietSettingsModel struct {
+	UserID          int     `json:"user_id"`
+	HeightCm        float64 `json:"height_cm"`
+	CurrentWeightKg float64 `json:"current_weight_kg"`
+	TargetWeightKg  float64 `json:"target_weight_kg"`
+	TargetKcal      float64 `json:"target_kcal"`
+	TargetProtein   float64 `json:"target_protein"`
+	TargetFat       float64 `json:"target_fat"`
+	TargetCarbs     float64 `json:"target_carbs"`
+}
 
 type DietProductItem struct {
 	ID            int      `json:"id"`
@@ -242,10 +253,9 @@ type CreateProductReq struct {
 }
 
 type LogDietReq struct {
-	UserID        int      `json:"user_id"`
-	ProductID     int      `json:"product_id"`
-	AmountG       float64  `json:"amount"`
-	ServingsCount *float64 `json:"servings_count"`
+	UserID    int     `json:"user_id"`
+	ProductID int     `json:"product_id"`
+	AmountG   float64 `json:"amount"`
 }
 
 type DietLogItem struct {
@@ -767,13 +777,16 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 		weID, _ := weRes.LastInsertId()
 
 		tSets := []RoutineSet{}
-		tRows, _ := db.Query(`SELECT set_number, set_type FROM training_routine_sets WHERE routine_exercise_id = ? ORDER BY set_number`, re.id)
-		for tRows.Next() {
-			var ts RoutineSet
-			tRows.Scan(&ts.SetNumber, &ts.SetType)
-			tSets = append(tSets, ts)
+		tRows, errSets := db.Query(`SELECT set_number, set_type FROM training_routine_sets WHERE routine_exercise_id = ? ORDER BY set_number ASC`, re.id)
+		if errSets == nil {
+			for tRows.Next() {
+				var ts RoutineSet
+				if err := tRows.Scan(&ts.SetNumber, &ts.SetType); err == nil {
+					tSets = append(tSets, ts)
+				}
+			}
+			tRows.Close()
 		}
-		tRows.Close()
 
 		lSets := []LastSetValue{}
 		var lastWeID int
@@ -907,16 +920,40 @@ func handleAPIRoutineExerciseAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	var maxPos int
-	_ = db.QueryRow(`SELECT COALESCE(MAX(position), 0) FROM training_routine_exercises WHERE routine_id = ?`, req.RoutineID).Scan(&maxPos)
-
-	_, err = db.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`,
-		req.RoutineID, req.ExerciseID, maxPos+1)
-
+	tx, err := db.Begin()
 	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	var maxPos int
+	_ = tx.QueryRow(`SELECT COALESCE(MAX(position), 0) FROM training_routine_exercises WHERE routine_id = ?`, req.RoutineID).Scan(&maxPos)
+
+	res, err := tx.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`,
+		req.RoutineID, req.ExerciseID, maxPos+1)
+	if err != nil {
+		tx.Rollback()
 		http.Error(w, "Failed to add exercise", http.StatusInternalServerError)
 		return
 	}
+
+	newReID, _ := res.LastInsertId()
+
+	// Automatycznie wstawiamy 3 domyślne serie do szablonu nowo dodanego ćwiczenia
+	for s := 1; s <= 3; s++ {
+		_, err = tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, 'standard')`, newReID, s)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to insert default routine sets", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1090,15 +1127,24 @@ func handleAPIUpdateRoutineSets(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	db, _ := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
 	defer db.Close()
 
-	tx, _ := db.Begin()
-	tx.Exec(`DELETE FROM training_routine_sets WHERE routine_exercise_id = ?`, req.RoutineExerciseID)
-	for _, s := range req.Sets {
-		tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, ?)`, req.RoutineExerciseID, s.SetNumber, s.SetType)
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Transaction error", http.StatusInternalServerError)
+		return
 	}
-	tx.Commit()
+
+	_, _ = tx.Exec(`DELETE FROM training_routine_sets WHERE routine_exercise_id = ?`, req.RoutineExerciseID)
+	for _, s := range req.Sets {
+		_, _ = tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, ?)`, req.RoutineExerciseID, s.SetNumber, s.SetType)
+	}
+	_ = tx.Commit()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1541,6 +1587,121 @@ func handleGetConsistencyStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// -------------------------------------------------------------
+// ENDPOINTY MODUŁU DIETY
+// -------------------------------------------------------------
+
+func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+
+	if r.Method == http.MethodGet {
+		var s UserDietSettingsModel
+		s.UserID = 1
+		s.HeightCm = 174.0
+		s.TargetWeightKg = 78.0
+		s.TargetKcal = 2700.0
+		s.TargetProtein = 140.0
+		s.TargetFat = 75.0
+		s.TargetCarbs = 350.0
+
+		_ = db.QueryRow(`
+			SELECT weight_kg FROM user_daily_metrics 
+			WHERE user_id = ? AND weight_kg > 0 
+			ORDER BY date DESC, id DESC LIMIT 1`, userID).Scan(&s.CurrentWeightKg)
+
+		if s.CurrentWeightKg == 0 {
+			s.CurrentWeightKg = 70.0
+		}
+
+		var surplus, pPerKg, fPerKg float64
+		err := db.QueryRow(`
+			SELECT height_cm, target_weight_kg, surplus_kcal, target_p_per_kg, target_f_per_kg
+			FROM user_diet_settings WHERE user_id = ?`, userID).
+			Scan(&s.HeightCm, &s.TargetWeightKg, &surplus, &pPerKg, &fPerKg)
+
+		if err == nil {
+			s.TargetKcal = 2400.0 + surplus
+			s.TargetProtein = pPerKg * s.TargetWeightKg
+			s.TargetFat = fPerKg * s.TargetWeightKg
+			remainingCalories := s.TargetKcal - (s.TargetProtein*4.0 + s.TargetFat*9.0)
+			if remainingCalories > 0 {
+				s.TargetCarbs = remainingCalories / 4.0
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(s)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req UserDietSettingsModel
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid body", http.StatusBadRequest)
+			return
+		}
+		if req.UserID == 0 {
+			req.UserID = 1
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		if req.CurrentWeightKg > 0 {
+			_, _ = tx.Exec(`
+				INSERT INTO user_daily_metrics (user_id, date, weight_kg)
+				VALUES (?, date('now'), ?)
+				ON CONFLICT(user_id, date) DO UPDATE SET weight_kg = excluded.weight_kg`,
+				req.UserID, req.CurrentWeightKg)
+		}
+
+		surplus := req.TargetKcal - 2400.0
+		pPerKg := 2.0
+		fPerKg := 1.0
+		if req.TargetWeightKg > 0 {
+			pPerKg = req.TargetProtein / req.TargetWeightKg
+			fPerKg = req.TargetFat / req.TargetWeightKg
+		}
+
+		_, err = tx.Exec(`
+			INSERT INTO user_diet_settings (user_id, height_cm, target_weight_kg, surplus_kcal, target_p_per_kg, target_f_per_kg, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+			ON CONFLICT(user_id) DO UPDATE SET
+				height_cm = excluded.height_cm,
+				target_weight_kg = excluded.target_weight_kg,
+				surplus_kcal = excluded.surplus_kcal,
+				target_p_per_kg = excluded.target_p_per_kg,
+				target_f_per_kg = excluded.target_f_per_kg,
+				updated_at = datetime('now')`,
+			req.UserID, req.HeightCm, req.TargetWeightKg, surplus, pPerKg, fPerKg)
+
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, "Failed to save diet settings", http.StatusInternalServerError)
+			return
+		}
+
+		_ = tx.Commit()
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
 func handleAPIDietProducts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1575,7 +1736,6 @@ func handleAPIDietProducts(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(products)
 }
 
-// 2. Tworzenie nowego produktu w katalogu
 func handleAPIDietProductCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1627,7 +1787,6 @@ func handleAPIDietProductCreate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 3. Podsumowanie dnia i lista logów
 func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1657,11 +1816,21 @@ func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
 	resp.TargetC = 350.0
 	resp.Logs = []DietLogItem{}
 
-	// Pobranie celów użytkownika z user_diet_settings
-	_ = db.QueryRow(`
-		SELECT (2400.0 + surplus_kcal), (target_p_per_kg * target_weight_kg), (target_f_per_kg * target_weight_kg), 350.0 
+	var surplus, targetWeight, pPerKg, fPerKg float64
+	err = db.QueryRow(`
+		SELECT target_weight_kg, surplus_kcal, target_p_per_kg, target_f_per_kg 
 		FROM user_diet_settings WHERE user_id = ?`, userID).
-		Scan(&resp.TargetKcal, &resp.TargetP, &resp.TargetF, &resp.TargetC)
+		Scan(&targetWeight, &surplus, &pPerKg, &fPerKg)
+
+	if err == nil {
+		resp.TargetKcal = 2400.0 + surplus
+		resp.TargetP = pPerKg * targetWeight
+		resp.TargetF = fPerKg * targetWeight
+		remainingCalories := resp.TargetKcal - (resp.TargetP*4.0 + resp.TargetF*9.0)
+		if remainingCalories > 0 {
+			resp.TargetC = remainingCalories / 4.0
+		}
+	}
 
 	rows, err := db.Query(`
 		SELECT 
@@ -1700,7 +1869,6 @@ func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// 4. Logowanie posiłku
 func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1734,7 +1902,6 @@ func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// 5. Usuwanie wpisu z logu
 func handleAPIDietLogDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1761,4 +1928,49 @@ func handleAPIDietLogDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleGetDietConsistencyStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+
+	query := `
+       SELECT DISTINCT date(logged_at)
+       FROM diet_logs
+       WHERE user_id = ? AND date(logged_at) >= date('now', '-120 days')
+       ORDER BY date(logged_at) ASC
+    `
+	rows, err := db.Query(query, userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var dates []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err == nil {
+			dates = append(dates, d)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ConsistencyStatsResponse{
+		WorkoutDates: dates,
+	})
 }

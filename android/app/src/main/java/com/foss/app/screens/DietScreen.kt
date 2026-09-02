@@ -23,7 +23,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.foss.app.AppViewModel
 import com.foss.app.UiState
 import com.foss.app.models.CreateProductRequest
@@ -41,7 +40,7 @@ private val ProteinColor = Color(0xFFEF4444) // Red
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DietScreen(
-    viewModel: AppViewModel = viewModel()
+    viewModel: AppViewModel
 ) {
     LaunchedEffect(Unit) {
         viewModel.loadDietData()
@@ -472,7 +471,12 @@ private fun AddFoodBottomSheet(
                         Text("No products found", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = { onAddProductClick(searchQuery.trim()) }) {
-                            Text("Add product '${searchQuery.trim()}'", color = MaterialTheme.colorScheme.primary)
+                            val buttonText = if (searchQuery.isNotBlank()) {
+                                "Add product '${searchQuery.trim()}'"
+                            } else {
+                                "Add new product"
+                            }
+                            Text(buttonText, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 } else {

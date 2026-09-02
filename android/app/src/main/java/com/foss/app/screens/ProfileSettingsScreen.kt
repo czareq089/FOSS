@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -21,8 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.foss.app.UiState
 import com.foss.app.AppViewModel
+import com.foss.app.UiState
 import com.foss.app.ui.theme.AccentBlue
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -34,6 +35,7 @@ fun ProfileSettingsScreen(
     viewModel: AppViewModel,
     onNavigateToEquipment: () -> Unit,
     onNavigateToAutomation: () -> Unit,
+    onNavigateToDietSettings: () -> Unit,
     onBack: () -> Unit
 ) {
     LaunchedEffect(Unit) {
@@ -80,7 +82,6 @@ fun ProfileSettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Sekcja Główna Profilu
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -117,7 +118,6 @@ fun ProfileSettingsScreen(
                 )
             }
 
-            // Statystyki Profilu (All time Volume & Workouts)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -179,7 +179,6 @@ fun ProfileSettingsScreen(
 
             Spacer(Modifier.height(4.dp))
 
-            // Opcje Konfiguracyjne
             SettingsItemCard(
                 title = "Equipment & Plates",
                 subtitle = "Available weights and plate inventory",
@@ -192,6 +191,13 @@ fun ProfileSettingsScreen(
                 subtitle = "Warmup ramp-up, Drop sets and Back-off rules",
                 icon = Icons.Filled.Calculate,
                 onClick = onNavigateToAutomation
+            )
+
+            SettingsItemCard(
+                title = "Diet & Metabolic Goals",
+                subtitle = "Set height, weight and daily calories & macros",
+                icon = Icons.Filled.Restaurant,
+                onClick = onNavigateToDietSettings
             )
 
             SettingsItemCard(

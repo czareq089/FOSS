@@ -5,16 +5,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
-import com.foss.app.UiState
 import com.foss.app.AppViewModel
-import com.foss.app.components.ConsistencyHeatmapCard
+import com.foss.app.UiState
+import com.foss.app.components.DietConsistencyCard
+import com.foss.app.components.TrainingConsistencyCard
 import com.foss.app.components.VolumeWidgetCard
 import com.foss.app.ui.theme.AccentBlue
 
@@ -29,12 +32,14 @@ fun DashboardScreen(
     LaunchedEffect(selectedRange) {
         viewModel.loadDashboardVolume(selectedRange)
         viewModel.loadConsistencyStats()
+        viewModel.loadDietConsistencyStats()
     }
 
     val profileInteractionSource = remember { MutableInteractionSource() }
     val isProfilePressed by profileInteractionSource.collectIsPressedAsState()
-    val consistencyState = viewModel.consistencyStatsState.value
-    val workoutDates = (consistencyState as? UiState.Success)?.data?.workoutDates ?: emptyList()
+
+    val workoutDates = (viewModel.consistencyStatsState.value as? UiState.Success)?.data?.workoutDates ?: emptyList()
+    val dietDates = (viewModel.dietConsistencyStatsState.value as? UiState.Success)?.data?.workoutDates ?: emptyList()
 
     Scaffold(
         topBar = {
@@ -71,10 +76,13 @@ fun DashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text("Overview", style = MaterialTheme.typography.titleLarge)
+
+            TrainingConsistencyCard(dates = workoutDates)
 
             VolumeWidgetCard(
                 selectedRange = selectedRange,
@@ -83,10 +91,7 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            ConsistencyHeatmapCard(
-                workoutDatesStrings = workoutDates,
-                modifier = Modifier.fillMaxWidth()
-            )
+            DietConsistencyCard(dates = dietDates)
         }
     }
 }

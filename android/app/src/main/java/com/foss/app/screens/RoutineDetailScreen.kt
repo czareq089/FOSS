@@ -37,8 +37,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.foss.app.UiState
 import com.foss.app.AppViewModel
+import com.foss.app.UiState
 import com.foss.app.models.ReorderPosition
 import com.foss.app.models.RoutineExercisePreview
 import com.foss.app.models.RoutineSet
@@ -133,17 +133,29 @@ fun RoutineDetailScreen(
                             ) {
                                 if (editMode) {
                                     scope.launch {
-                                        val positions = exercises.mapIndexed { index, ex -> ReorderPosition(exerciseId = ex.exerciseId, position = index + 1) }
+                                        val positions = exercises.mapIndexed { index, ex ->
+                                            ReorderPosition(exerciseId = ex.exerciseId, position = index + 1)
+                                        }
                                         viewModel.reorderExercises(routineId, positions)
+
+                                        // KLUCZOWY FIX: Zapisujemy serie z mutableTemplateSets (czyli to co ustawił użytkownik)
                                         exercises.forEach { ex ->
-                                            val safeSets = (ex.templateSets ?: listOf(RoutineSet(1, "standard"))).mapIndexed { i, s -> RoutineSet(i + 1, s.setType) }
+                                            val currentSets = ex.mutableTemplateSets.toList()
+                                            val safeSets = if (currentSets.isNotEmpty()) {
+                                                currentSets.mapIndexed { i, s -> RoutineSet(i + 1, s.setType) }
+                                            } else {
+                                                listOf(RoutineSet(1, "standard"))
+                                            }
                                             viewModel.updateRoutineSets(ex.routineExerciseId, safeSets)
                                         }
+
                                         viewModel.loadRoutineExercises(routineId)
                                         viewModel.loadRoutineAnalytics(routineId)
                                         editMode = false
                                     }
-                                } else editMode = true
+                                } else {
+                                    editMode = true
+                                }
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -177,8 +189,11 @@ fun RoutineDetailScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            if (isStartingWorkout) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            else Text("Start workout")
+                            if (isStartingWorkout) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Text("Start workout")
+                            }
                         }
                     }
                 }
@@ -249,7 +264,7 @@ fun RoutineDetailScreen(
                     SetTypeOption("standard", "Standard set", null, Color.White) { updateType("standard") }
                     SetTypeOption("warmup", "Warmup set", "W", Color(0xFFFFC107)) { updateType("warmup") }
                     SetTypeOption("failure", "Failure set", "F", Color(0xFFEF4444)) { updateType("failure") }
-                    SetTypeOption("drop", "Drop set", "D", Color(0xFF3B82F6)) { updateType("drop") }
+                    SetTypeOption("drop", "Drop set", "D", Color(0xFFA855F7)) { updateType("drop") }
                     SetTypeOption("back_off", "Back-off set", "B", Color(0xFF34D399)) { updateType("back_off") }
                 }
             }
@@ -271,7 +286,7 @@ private fun RoutineVolumeChartCard(state: UiState<com.foss.app.models.RoutineAna
             val rawValues: List<Float> = history.map { it.volumeKg.toFloat() }
             val baseSeries = if (rawValues.size == 1) listOf(0f, rawValues[0]) else rawValues
             val maxVal = baseSeries.maxOrNull() ?: 0f
-            val targetCeiling = if (maxVal > 0f) maxVal * 2.0f else 10f
+            val targetCeiling = if (maxVal > 0f) maxVal * 1.25f else 10f
             val ceilingSeries = List(baseSeries.size) { targetCeiling }
 
             withContext(Dispatchers.Default) {
@@ -389,7 +404,9 @@ fun SetTypeOption(type: String, label: String, letter: String?, color: Color, on
     Box(
         modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 16.dp, horizontal = 24.dp)
     ) {
-        if (letter != null) Text(text = letter, color = color, style = MaterialTheme.typography.titleLarge, modifier = Modifier.align(Alignment.CenterStart))
+        if (letter != null) {
+            Text(text = letter, color = color, style = MaterialTheme.typography.titleLarge, modifier = Modifier.align(Alignment.CenterStart))
+        }
         Text(text = label, color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.Center))
     }
 }
@@ -422,15 +439,15 @@ private fun ExercisePreviewCard(
                     .alpha(if (isTitlePressed) 0.4f else 1f)
             )
 
-            val displaySets = exercise.templateSets ?: emptyList()
+            val displaySets = exercise.mutableTemplateSets.toList()
             if (displaySets.isNotEmpty()) {
-                Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     displaySets.forEach { set ->
                         val typeColor = when(set.setType) {
                             "warmup" -> Color(0xFFFFC107)
                             "failure" -> Color(0xFFEF4444)
                             "back_off" -> Color(0xFF34D399)
-                            "drop" -> Color(0xFF3B82F6)
+                            "drop" -> Color(0xFFA855F7)
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         }
                         Text("${set.setNumber}", color = typeColor, style = MaterialTheme.typography.labelMedium)
@@ -578,7 +595,13 @@ private fun ReorderableExerciseList(
                                     .clickable(
                                         interactionSource = deleteExSource,
                                         indication = null
-                                    ) { scope.launch { if(viewModel.removeExerciseFromRoutine(routineId, exercise.exerciseId)) exercises.removeAt(index) } },
+                                    ) {
+                                        scope.launch {
+                                            if (viewModel.removeExerciseFromRoutine(routineId, exercise.exerciseId)) {
+                                                exercises.removeAt(index)
+                                            }
+                                        }
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
@@ -611,7 +634,7 @@ private fun ReorderableExerciseList(
                                             "warmup" -> Color(0xFFFFC107)
                                             "failure" -> Color(0xFFEF4444)
                                             "back_off" -> Color(0xFF34D399)
-                                            "drop" -> Color(0xFF3B82F6)
+                                            "drop" -> Color(0xFFA855F7)
                                             else -> MaterialTheme.colorScheme.onSurface
                                         }
 
@@ -662,7 +685,11 @@ private fun ReorderableExerciseList(
                                                     .clickable(
                                                         interactionSource = removeSetSource,
                                                         indication = null
-                                                    ) { if (sIndex in templateList.indices) templateList.removeAt(sIndex) },
+                                                    ) {
+                                                        if (sIndex in templateList.indices) {
+                                                            templateList.removeAt(sIndex)
+                                                        }
+                                                    },
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(Icons.Filled.Close, contentDescription = "Remove set", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))

@@ -41,13 +41,20 @@ class AppViewModel : ViewModel() {
     var algorithmSettingsState = mutableStateOf<UiState<UserAlgorithmSettings>>(UiState.Idle)
         private set
 
+    var userDietSettingsState = mutableStateOf<UiState<UserDietSettings>>(UiState.Idle)
+        private set
+
     var consistencyStatsState = mutableStateOf<UiState<ConsistencyStats>>(UiState.Loading)
+        private set
+
+    var dietConsistencyStatsState = mutableStateOf<UiState<ConsistencyStats>>(UiState.Loading)
         private set
 
     var dietSummaryState = mutableStateOf<UiState<DailyDietSummary>>(UiState.Idle)
         private set
     var dietProductsState = mutableStateOf<UiState<List<DietProduct>>>(UiState.Idle)
         private set
+
     fun loadRoutines() {
         viewModelScope.launch {
             if (routinesState.value !is UiState.Success) {
@@ -352,6 +359,7 @@ class AppViewModel : ViewModel() {
             false
         }
     }
+
     fun loadUserPlates() {
         viewModelScope.launch {
             userPlatesState.value = UiState.Loading
@@ -409,6 +417,35 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    fun loadUserDietSettings() {
+        viewModelScope.launch {
+            userDietSettingsState.value = UiState.Loading
+            try {
+                val res = api.getUserDietSettings(currentUserId)
+                userDietSettingsState.value = if (res.isSuccessful && res.body() != null) {
+                    UiState.Success(res.body()!!)
+                } else {
+                    UiState.Success(UserDietSettings(userId = currentUserId))
+                }
+            } catch (e: Exception) {
+                userDietSettingsState.value = UiState.Success(UserDietSettings(userId = currentUserId))
+            }
+        }
+    }
+
+    suspend fun saveUserDietSettings(settings: UserDietSettings): Boolean {
+        return try {
+            val res = api.updateUserDietSettings(settings)
+            if (res.isSuccessful) {
+                userDietSettingsState.value = UiState.Success(settings)
+                loadDietData()
+                true
+            } else false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun loadConsistencyStats() {
         viewModelScope.launch {
             try {
@@ -416,6 +453,17 @@ class AppViewModel : ViewModel() {
                 consistencyStatsState.value = UiState.Success(stats)
             } catch (e: Exception) {
                 consistencyStatsState.value = UiState.Error(e.message ?: "Failed to load consistency stats")
+            }
+        }
+    }
+
+    fun loadDietConsistencyStats() {
+        viewModelScope.launch {
+            try {
+                val stats = api.getDietConsistencyStats(currentUserId)
+                dietConsistencyStatsState.value = UiState.Success(stats)
+            } catch (e: Exception) {
+                dietConsistencyStatsState.value = UiState.Error(e.message ?: "Failed to load diet consistency stats")
             }
         }
     }
@@ -443,7 +491,10 @@ class AppViewModel : ViewModel() {
     suspend fun logFood(productId: Int, amountG: Double): Boolean {
         return try {
             val ok = api.logDietFood(LogDietRequest(currentUserId, productId, amountG)).isSuccessful
-            if (ok) loadDietData()
+            if (ok) {
+                loadDietData()
+                loadDietConsistencyStats()
+            }
             ok
         } catch (e: Exception) { false }
     }
@@ -461,7 +512,10 @@ class AppViewModel : ViewModel() {
     suspend fun deleteFoodLog(logId: Int): Boolean {
         return try {
             val ok = api.deleteDietLog(logId).isSuccessful
-            if (ok) loadDietData()
+            if (ok) {
+                loadDietData()
+                loadDietConsistencyStats()
+            }
             ok
         } catch (e: Exception) { false }
     }

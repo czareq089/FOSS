@@ -13,7 +13,7 @@ func main() {
 	// 1. WEB HANDLERS (Dashboard & Training HTMX)
 	// ==========================================
 	http.HandleFunc("/", handleWebIndex)
-	http.HandleFunc("/training", handleWebTrainingPage) // zmienione z /routines
+	http.HandleFunc("/training", handleWebTrainingPage)
 	http.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
 
 	// Widżety Dashboardu
@@ -41,6 +41,7 @@ func main() {
 	http.HandleFunc("/api/routines", handleAPIRoutines)
 	http.HandleFunc("/api/routines/exercises", handleAPIRoutineExercises)
 	http.HandleFunc("/api/routines/exercises/reorder", handleAPIReorderExercises)
+	http.HandleFunc("/api/routines/exercises/sets/update", handleAPIUpdateRoutineSets)
 	http.HandleFunc("/api/workouts/start", handleAPIStartWorkout)
 	http.HandleFunc("/api/workouts/log", handleAPILogSet)
 	http.HandleFunc("/api/workouts", handleAPIWorkouts)
@@ -59,12 +60,14 @@ func main() {
 	http.HandleFunc("/api/workouts/update", handleAPIWorkoutUpdateDetails)
 	http.HandleFunc("/api/user/plates", handleAPIUserPlates)
 	http.HandleFunc("/api/user/algorithms", handleAPIUserAlgorithms)
+	http.HandleFunc("/api/user/diet-settings", handleAPIUserDietSettings)
 	http.HandleFunc("/api/training/stats/consistency", handleGetConsistencyStats)
 	http.HandleFunc("/api/diet/products", handleAPIDietProducts)
 	http.HandleFunc("/api/diet/products/create", handleAPIDietProductCreate)
 	http.HandleFunc("/api/diet/summary", handleAPIDietDaySummary)
 	http.HandleFunc("/api/diet/log", handleAPIDietLog)
 	http.HandleFunc("/api/diet/log/delete", handleAPIDietLogDelete)
+	http.HandleFunc("/api/diet/stats/consistency", handleGetDietConsistencyStats)
 
 	// Uruchomienie serwera
 	port := ":8080"

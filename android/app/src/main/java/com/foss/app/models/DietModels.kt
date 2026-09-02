@@ -2,6 +2,17 @@ package com.foss.app.models
 
 import com.google.gson.annotations.SerializedName
 
+data class UserDietSettings(
+    @SerializedName("user_id") val userId: Int = 1,
+    @SerializedName("height_cm") val heightCm: Double = 174.0,
+    @SerializedName("current_weight_kg") val currentWeightKg: Double = 70.0,
+    @SerializedName("target_weight_kg") val targetWeightKg: Double = 78.0,
+    @SerializedName("target_kcal") val targetKcal: Double = 2700.0,
+    @SerializedName("target_protein") val targetProtein: Double = 140.0,
+    @SerializedName("target_fat") val targetFat: Double = 75.0,
+    @SerializedName("target_carbs") val targetCarbs: Double = 350.0
+)
+
 data class DietProduct(
     @SerializedName("id") val id: Int,
     @SerializedName("name") val name: String,

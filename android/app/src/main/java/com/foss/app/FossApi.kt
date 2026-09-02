@@ -104,8 +104,17 @@ interface FossApi {
     @POST("/api/user/algorithms")
     suspend fun updateAlgorithmSettings(@Body settings: UserAlgorithmSettings): Response<Unit>
 
+    @GET("/api/user/diet-settings")
+    suspend fun getUserDietSettings(@Query("user_id") userId: Int = 1): Response<UserDietSettings>
+
+    @POST("/api/user/diet-settings")
+    suspend fun updateUserDietSettings(@Body settings: UserDietSettings): Response<Unit>
+
     @GET("/api/training/stats/consistency")
     suspend fun getConsistencyStats(): ConsistencyStats
+
+    @GET("/api/diet/stats/consistency")
+    suspend fun getDietConsistencyStats(@Query("user_id") userId: Int = 1): ConsistencyStats
 
     @GET("/api/diet/products")
     suspend fun getDietProducts(): Response<List<DietProduct>>

@@ -30,6 +30,7 @@ import com.foss.app.navigation.FossBottomNavBar
 import com.foss.app.screens.AutomationSettingsScreen
 import com.foss.app.screens.DashboardScreen
 import com.foss.app.screens.DietScreen
+import com.foss.app.screens.DietSettingsScreen
 import com.foss.app.screens.EquipmentScreen
 import com.foss.app.screens.ExerciseDetailScreen
 import com.foss.app.screens.ExerciseSelectionScreen
@@ -129,7 +130,7 @@ fun FossApp() {
             }
 
             composable(BottomNavItem.Diet.route) {
-                DietScreen()
+                DietScreen(viewModel = viewModel)
             }
 
             composable(
@@ -259,6 +260,9 @@ fun FossApp() {
                     onNavigateToAutomation = {
                         navController.navigate("automationSettings")
                     },
+                    onNavigateToDietSettings = {
+                        navController.navigate("dietSettings")
+                    },
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -272,6 +276,13 @@ fun FossApp() {
 
             composable("automationSettings") {
                 AutomationSettingsScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable("dietSettings") {
+                DietSettingsScreen(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }
                 )
