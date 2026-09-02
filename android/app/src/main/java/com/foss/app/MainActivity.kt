@@ -196,7 +196,11 @@ fun FossApp() {
                         scope.launch {
                             if (type == "routine") {
                                 val success = viewModel.addExerciseToRoutine(id, exerciseId)
-                                if (success) navController.popBackStack()
+                                if (success) {
+                                    navController.navigate("routineDetail/$id?edit=true") {
+                                        popUpTo("routineDetail/$id?edit=true") { inclusive = true }
+                                    }
+                                }
                             } else if (type == "workout") {
                                 val success = viewModel.addExerciseToActiveWorkout(id, exerciseId)
                                 if (success) navController.popBackStack()

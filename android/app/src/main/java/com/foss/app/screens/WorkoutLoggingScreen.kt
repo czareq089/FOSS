@@ -645,7 +645,7 @@ fun WorkoutLoggingScreen(
         AlertDialog(
             onDismissRequest = { if (!cancelling) showCancelDialog = false },
             title = { Text("Cancel this workout?", color = MaterialTheme.colorScheme.onSurface) },
-            text = { Text("Any sets you've already logged will be deleted.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            text = { Text("Any sets you've already logged will be deleted. This can't be undone.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
                 TextButton(
                     enabled = !cancelling,
@@ -684,6 +684,12 @@ private fun ExerciseLogContent(
                 row.reps = first.reps
                 row.rir = first.rir
             }
+        }
+    }
+
+    fun renumberSets() {
+        sets.forEachIndexed { i, s ->
+            s.setNumber = i + 1
         }
     }
 
@@ -822,11 +828,7 @@ private fun ExerciseLogContent(
                                             scope.launch {
                                                 val success = viewModel.logSet(exercise.workoutExerciseId, row.setNumber, reps, weight, rir, row.setType)
                                                 row.submitting = false
-                                                if (success) {
-                                                    if (sets.last() === row) {
-                                                        sets.add(SetRowState(row.setNumber + 1))
-                                                    }
-                                                } else {
+                                                if (!success) {
                                                     row.confirmed = false
                                                     row.error = "Failed"
                                                 }
@@ -860,7 +862,10 @@ private fun ExerciseLogContent(
                                         .clickable(
                                             interactionSource = deleteSource,
                                             indication = null
-                                        ) { sets.remove(row) },
+                                        ) {
+                                            sets.remove(row)
+                                            renumberSets()
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(Icons.Filled.Close, contentDescription = "Cancel", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -872,7 +877,7 @@ private fun ExerciseLogContent(
             }
         }
         TextButton(
-            onClick = { sets.add(SetRowState((sets.maxOfOrNull { it.setNumber } ?: 0) + 1)) },
+            onClick = { sets.add(SetRowState(sets.size + 1)) },
             modifier = Modifier.align(Alignment.End)
         ) { Text("+ Add set", color = MaterialTheme.colorScheme.primary) }
     }

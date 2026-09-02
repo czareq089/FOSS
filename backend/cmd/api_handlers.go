@@ -291,7 +291,7 @@ func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 		if userID == "" {
 			userID = "1"
 		}
-		rows, err := db.Query(`SELECT id, name FROM training_routines WHERE user_id = ? ORDER BY created_at DESC`, userID)
+		rows, err := db.Query(`SELECT id, name FROM training_routines WHERE user_id = ? ORDER BY name COLLATE NOCASE ASC`, userID)
 		if err != nil {
 			http.Error(w, "Failed to fetch routines", http.StatusInternalServerError)
 			return
