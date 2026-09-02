@@ -4,11 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,23 +15,20 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Balance
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -43,14 +36,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import com.foss.app.UiState
 import com.foss.app.AppViewModel
+import com.foss.app.UiState
 import com.foss.app.models.ExerciseInfo
 import com.foss.app.models.PlateCalculator
 import com.foss.app.models.ReorderPosition
@@ -78,7 +70,7 @@ class SetRowState(initialSetNumber: Int) {
     var fallbackRir by mutableStateOf("")
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkoutLoggingScreen(
     viewModel: AppViewModel,
@@ -95,11 +87,11 @@ fun WorkoutLoggingScreen(
     }
     val state = viewModel.workoutState.value
     var showCancelDialog by remember { mutableStateOf(false) }
-    var showDiscardEditDialog by remember { mutableStateOf(false) }
     var showSyncDialog by remember { mutableStateOf(false) }
-    var exerciseToDelete by remember { mutableStateOf<ExerciseInfo?>(null) }
+    var showDiscardEditDialog by remember { mutableStateOf(false) }
     var cancelling by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
     val workoutStartTime = rememberSaveable { System.currentTimeMillis() }
     var elapsedSeconds by remember { mutableLongStateOf((System.currentTimeMillis() - workoutStartTime) / 1000) }
 
@@ -110,33 +102,11 @@ fun WorkoutLoggingScreen(
         }
     }
 
-    val formattedDuration = remember(elapsedSeconds) {
-        val hours = elapsedSeconds / 3600
-        val minutes = (elapsedSeconds % 3600) / 60
-        val seconds = elapsedSeconds % 60
-        if (hours > 0) {
-            String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            String.format(Locale.US, "%02d:%02d", minutes, seconds)
-        }
-    }
-
     var activeSetRowForType by remember { mutableStateOf<SetRowState?>(null) }
     var activeExerciseForTimer by remember { mutableStateOf<ExerciseInfo?>(null) }
-    var activeExerciseForPlates by remember { mutableStateOf<Pair<ExerciseInfo, Double>?>(null) }
-
     val exerciseRestTimes = remember { mutableStateMapOf<Int, Int>() }
-    val exerciseSetsMap = remember { mutableStateMapOf<Int, List<SetRowState>>() }
+    val exerciseSetsMap = remember { mutableStateMapOf<Int, SnapshotStateList<SetRowState>>() }
     val sheetState = rememberModalBottomSheetState()
-
-    var prBannerText by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(prBannerText) {
-        if (prBannerText != null) {
-            delay(3500L)
-            prBannerText = null
-        }
-    }
 
     var timerRemaining by remember { mutableIntStateOf(0) }
     var timerTotal by remember { mutableIntStateOf(0) }
@@ -190,30 +160,13 @@ fun WorkoutLoggingScreen(
         }
     }
 
-    val allActiveSets = exerciseSetsMap.values.flatten()
-    val confirmedSetsCount = allActiveSets.count { it.confirmed }
-    val prCount = allActiveSets.count { it.confirmed && it.isPr }
-    val totalVolumeKg = allActiveSets.filter { it.confirmed }.sumOf { row ->
-        val w = row.weight.toDoubleOrNull() ?: row.fallbackWeight.toDoubleOrNull() ?: 0.0
-        val r = row.reps.toIntOrNull() ?: row.fallbackReps.toIntOrNull() ?: 0
-        w * r
-    }
-    val formattedVolume = if (totalVolumeKg % 1.0 == 0.0) {
-        totalVolumeKg.toInt().toString()
-    } else {
-        String.format(Locale.US, "%.1f", totalVolumeKg)
-    }
+    val userPlates = (viewModel.userPlatesState.value as? UiState.Success)?.data ?: emptyList()
+    val algoSettings = (viewModel.algorithmSettingsState.value as? UiState.Success)?.data ?: UserAlgorithmSettings()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        text = if (isReordering) "Edit exercises" else "Log workout",
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1
-                    )
-                },
+                title = { Text(if (isReordering) "Edit exercises" else "Log workout") },
                 navigationIcon = {
                     val closeSource = remember { MutableInteractionSource() }
                     val isClosePressed by closeSource.collectIsPressedAsState()
@@ -330,67 +283,9 @@ fun WorkoutLoggingScreen(
 
                 LazyColumn(
                     state = listState,
-                    contentPadding = PaddingValues(bottom = 100.dp, top = 8.dp),
+                    contentPadding = PaddingValues(bottom = 100.dp, start = 16.dp, end = 16.dp, top = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    if (!isReordering) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surface)
-                                    .padding(top = 8.dp, bottom = 8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = formattedDuration,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = AccentBlue
-                                    )
-
-                                    Text(
-                                        text = "$formattedVolume kg",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-
-                                    Text(
-                                        text = "$confirmedSetsCount sets",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Stars,
-                                            contentDescription = "PR count",
-                                            tint = if (prCount > 0) AccentBlue else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = "$prCount PR",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = if (prCount > 0) AccentBlue else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
                     itemsIndexed(items = exercises, key = { _, exercise -> exercise.workoutExerciseId }) { index, exercise ->
                         val currentRestTime = exerciseRestTimes[exercise.workoutExerciseId] ?: 90
 
@@ -403,10 +298,77 @@ fun WorkoutLoggingScreen(
                         val currentOffset = listState.layoutInfo.visibleItemsInfo.find { it.index == index }?.offset ?: 0
                         val compensationOffset = if (isDragged) (initialItemOffset - currentOffset).toFloat() else 0f
 
+                        val setsList = exerciseSetsMap.getOrPut(exercise.workoutExerciseId) {
+                            val initialList = mutableStateListOf<SetRowState>()
+                            val templateCount = exercise.templateSets?.size ?: 0
+                            val lastCount = exercise.lastSets?.size ?: 0
+                            val totalCount = maxOf(1, maxOf(templateCount, lastCount))
+
+                            val workingSets = exercise.lastSets?.filter { it.setNumber > 0 } ?: emptyList()
+                            val baselineWeight = if (algoSettings.warmupBase == "heaviest_set") {
+                                workingSets.maxOfOrNull { it.weightKg } ?: 0.0
+                            } else {
+                                workingSets.firstOrNull()?.weightKg ?: 0.0
+                            }
+
+                            val warmupTemplates = exercise.templateSets?.filter { it.setType == "warmup" } ?: emptyList()
+                            val totalWarmups = warmupTemplates.size
+
+                            for (i in 1..totalCount) {
+                                val template = exercise.templateSets?.find { it.setNumber == i }
+                                val prevSet = exercise.lastSets?.find { it.setNumber == i }
+                                val currentType = template?.setType ?: "standard"
+
+                                var calcWeight = prevSet?.weightKg ?: 0.0
+                                var calcReps = prevSet?.reps ?: 0
+                                var calcRir = prevSet?.rir ?: 0
+
+                                when (currentType) {
+                                    "warmup" -> {
+                                        if (algoSettings.warmupEnabled && baselineWeight > 0.0) {
+                                            val warmupIndex = warmupTemplates.indexOf(template) + 1
+                                            val fraction = if (totalWarmups <= 1) 0.60 else 0.50 + (0.35 * ((warmupIndex - 1).toDouble() / maxOf(1, totalWarmups - 1)))
+                                            val targetRaw = baselineWeight * fraction
+                                            calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
+                                            calcReps = if (totalWarmups <= 1) 5 else maxOf(1, 6 - (warmupIndex * 2) + 1)
+                                            calcRir = 5
+                                        }
+                                    }
+                                    "drop" -> {
+                                        if (algoSettings.dropEnabled && baselineWeight > 0.0) {
+                                            val targetRaw = baselineWeight * (1.0 - (algoSettings.dropPercentage / 100.0))
+                                            calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
+                                            calcRir = 0
+                                        }
+                                    }
+                                    "back_off" -> {
+                                        if (algoSettings.backoffEnabled && baselineWeight > 0.0) {
+                                            val targetRaw = baselineWeight * (1.0 - (algoSettings.backoffPercentage / 100.0))
+                                            calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
+                                            calcRir = 1
+                                        }
+                                    }
+                                }
+
+                                initialList.add(SetRowState(i).apply {
+                                    this.setType = currentType
+                                    if (calcWeight > 0.0) {
+                                        this.fallbackWeight = if (calcWeight % 1.0 == 0.0) calcWeight.toInt().toString() else calcWeight.toString()
+                                    }
+                                    if (calcReps > 0) {
+                                        this.fallbackReps = calcReps.toString()
+                                    }
+                                    if (calcRir >= 0 && (prevSet != null || currentType != "standard")) {
+                                        this.fallbackRir = calcRir.toString()
+                                    }
+                                })
+                            }
+                            initialList
+                        }
+
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
                                 .zIndex(zIndex)
                         ) {
                             if (isTarget && !isMovingDown && isReordering) {
@@ -433,110 +395,83 @@ fun WorkoutLoggingScreen(
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            if (isReordering) {
-                                                Icon(
-                                                    Icons.Filled.DragHandle,
-                                                    contentDescription = "Drag to reorder",
-                                                    tint = if (isDragged) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier
-                                                        .size(36.dp)
-                                                        .pointerInput(exercise, index) {
-                                                            detectVerticalDragGestures(
-                                                                onDragStart = {
-                                                                    draggedIndex = index
-                                                                    targetIndex = index
-                                                                    dragOffsetY = 0f
-                                                                    initialItemOffset = listState.layoutInfo.visibleItemsInfo.find { it.index == index }?.offset ?: 0
-                                                                },
-                                                                onDragEnd = {
-                                                                    if (draggedIndex != null && targetIndex != null && draggedIndex != targetIndex) {
-                                                                        val from = draggedIndex!!.coerceIn(0, exercises.size - 1)
-                                                                        val to = targetIndex!!.coerceIn(0, exercises.size - 1)
-                                                                        val moved = exercises.removeAt(from)
-                                                                        val safeInsert = to.coerceIn(0, exercises.size)
-                                                                        exercises.add(safeInsert, moved)
-                                                                    }
-                                                                    draggedIndex = null
-                                                                    targetIndex = null
-                                                                    dragOffsetY = 0f
-                                                                },
-                                                                onDragCancel = {
-                                                                    draggedIndex = null
-                                                                    targetIndex = null
-                                                                    dragOffsetY = 0f
-                                                                },
-                                                                onVerticalDrag = { change, dragAmount ->
-                                                                    change.consume()
-                                                                    dragOffsetY += dragAmount
-
-                                                                    val currentDragged = draggedIndex ?: return@detectVerticalDragGestures
-                                                                    val layoutInfo = listState.layoutInfo
-                                                                    val draggedItemInfo = layoutInfo.visibleItemsInfo.find { it.index == currentDragged }
-
-                                                                    if (draggedItemInfo != null) {
-                                                                        val draggedHeight = draggedItemInfo.size
-                                                                        val centerOnScreen = initialItemOffset + dragOffsetY + (draggedHeight / 2f)
-
-                                                                        val target = layoutInfo.visibleItemsInfo.find {
-                                                                            it.index < exercises.size &&
-                                                                                    centerOnScreen > it.offset &&
-                                                                                    centerOnScreen < it.offset + it.size
-                                                                        }
-                                                                        if (target != null) {
-                                                                            targetIndex = target.index
-                                                                        }
-                                                                    }
-                                                                }
-                                                            )
-                                                        }
-                                                        .padding(4.dp)
-                                                )
-                                                Spacer(Modifier.width(8.dp))
-                                            }
-
-                                            val titleInteractionSource = remember { MutableInteractionSource() }
-                                            val isTitlePressed by titleInteractionSource.collectIsPressedAsState()
-
-                                            Text(
-                                                text = exercise.name,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier
-                                                    .clickable(
-                                                        interactionSource = titleInteractionSource,
-                                                        indication = null,
-                                                        enabled = !isReordering
-                                                    ) { onExerciseClick(exercise.exerciseId) }
-                                                    .alpha(if (isTitlePressed && !isReordering) 0.4f else 1f)
-                                            )
-                                        }
-
                                         if (isReordering) {
-                                            val deleteExSource = remember { MutableInteractionSource() }
-                                            val isDeleteExPressed by deleteExSource.collectIsPressedAsState()
-
-                                            Box(
+                                            Icon(
+                                                Icons.Filled.DragHandle,
+                                                contentDescription = "Drag to reorder",
+                                                tint = if (isDragged) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier
                                                     .size(36.dp)
-                                                    .alpha(if (isDeleteExPressed) 0.4f else 1f)
-                                                    .clickable(
-                                                        interactionSource = deleteExSource,
-                                                        indication = null
-                                                    ) {
-                                                        exerciseToDelete = exercise
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(Icons.Filled.Delete, contentDescription = "Delete exercise", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
-                                            }
+                                                    .pointerInput(exercise, index) {
+                                                        detectVerticalDragGestures(
+                                                            onDragStart = {
+                                                                draggedIndex = index
+                                                                targetIndex = index
+                                                                dragOffsetY = 0f
+                                                                initialItemOffset = listState.layoutInfo.visibleItemsInfo.find { it.index == index }?.offset ?: 0
+                                                            },
+                                                            onDragEnd = {
+                                                                if (draggedIndex != null && targetIndex != null && draggedIndex != targetIndex) {
+                                                                    val from = draggedIndex!!.coerceIn(0, exercises.size - 1)
+                                                                    val to = targetIndex!!.coerceIn(0, exercises.size - 1)
+                                                                    val moved = exercises.removeAt(from)
+                                                                    exercises.add(to, moved)
+                                                                }
+                                                                draggedIndex = null
+                                                                targetIndex = null
+                                                                dragOffsetY = 0f
+                                                            },
+                                                            onDragCancel = {
+                                                                draggedIndex = null
+                                                                targetIndex = null
+                                                                dragOffsetY = 0f
+                                                            },
+                                                            onVerticalDrag = { change, dragAmount ->
+                                                                change.consume()
+                                                                dragOffsetY += dragAmount
+
+                                                                val currentDragged = draggedIndex ?: return@detectVerticalDragGestures
+                                                                val layoutInfo = listState.layoutInfo
+                                                                val draggedItemInfo = layoutInfo.visibleItemsInfo.find { it.index == currentDragged }
+
+                                                                if (draggedItemInfo != null) {
+                                                                    val draggedHeight = draggedItemInfo.size
+                                                                    val centerOnScreen = initialItemOffset + dragOffsetY + (draggedHeight / 2f)
+
+                                                                    val target = layoutInfo.visibleItemsInfo.find {
+                                                                        it.index < exercises.size &&
+                                                                                centerOnScreen > it.offset &&
+                                                                                centerOnScreen < it.offset + it.size
+                                                                    }
+                                                                    if (target != null) {
+                                                                        targetIndex = target.index
+                                                                    }
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                    .padding(4.dp)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
                                         }
+
+                                        val titleInteractionSource = remember { MutableInteractionSource() }
+                                        val isTitlePressed by titleInteractionSource.collectIsPressedAsState()
+
+                                        Text(
+                                            text = exercise.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier
+                                                .clickable(
+                                                    interactionSource = titleInteractionSource,
+                                                    indication = null,
+                                                    enabled = !isReordering
+                                                ) { onExerciseClick(exercise.exerciseId) }
+                                                .alpha(if (isTitlePressed && !isReordering) 0.4f else 1f)
+                                        )
                                     }
 
                                     AnimatedVisibility(
@@ -547,20 +482,12 @@ fun WorkoutLoggingScreen(
                                         ExerciseLogContent(
                                             viewModel = viewModel,
                                             exercise = exercise,
+                                            sets = setsList,
                                             restSeconds = currentRestTime,
                                             onRestTimeClick = { activeExerciseForTimer = exercise },
-                                            onPlateCalculatorClick = { currentWeight ->
-                                                activeExerciseForPlates = Pair(exercise, currentWeight)
-                                            },
                                             onStartTimer = { seconds -> timerTotal = seconds; timerRemaining = seconds; isTimerRunning = true },
                                             onCancelTimer = { timerTotal = 0; timerRemaining = 0; isTimerRunning = false },
-                                            onOpenSetType = { row -> activeSetRowForType = row },
-                                            onSetsUpdated = { setList ->
-                                                exerciseSetsMap[exercise.workoutExerciseId] = setList
-                                            },
-                                            onPrAchieved = { msg ->
-                                                prBannerText = msg
-                                            }
+                                            onOpenSetType = { row -> activeSetRowForType = row }
                                         )
                                     }
                                 }
@@ -575,72 +502,16 @@ fun WorkoutLoggingScreen(
 
                     if (!isReordering) {
                         item {
-                            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                                OutlinedButton(onClick = onAddExerciseClick, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(8.dp)) {
-                                    Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Add exercise to active workout", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                            OutlinedButton(onClick = onAddExerciseClick, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(8.dp)) {
+                                Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Add exercise to active workout", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
                 }
             } else {
                 Text("No active workout.", modifier = Modifier.align(Alignment.Center))
-            }
-
-            AnimatedVisibility(
-                visible = prBannerText != null,
-                enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 12.dp, start = 16.dp, end = 16.dp)
-                    .zIndex(20f)
-            ) {
-                OutlinedCard(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    border = BorderStroke(1.5.dp, AccentBlue),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = AccentBlue.copy(alpha = 0.2f),
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Filled.Stars,
-                                    contentDescription = "PR",
-                                    tint = AccentBlue,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "NEW PERSONAL RECORD!",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = AccentBlue
-                            )
-                            Text(
-                                text = prBannerText ?: "",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
             }
 
             if (isTimerRunning || timerRemaining > 0) {
@@ -663,58 +534,6 @@ fun WorkoutLoggingScreen(
         }
     }
 
-    if (showDiscardEditDialog) {
-        AlertDialog(
-            onDismissRequest = { showDiscardEditDialog = false },
-            title = { Text("Discard edits?", color = MaterialTheme.colorScheme.onSurface) },
-            text = { Text("Are you sure you want to discard changes made to exercises?", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        exercises.clear()
-                        exercises.addAll(initialExercisesBackup)
-                        isReordering = false
-                        showDiscardEditDialog = false
-                    }
-                ) { Text("Discard", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDiscardEditDialog = false }) {
-                    Text("Keep editing", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(8.dp)
-        )
-    }
-
-    if (exerciseToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { exerciseToDelete = null },
-            title = { Text("Remove exercise?", color = MaterialTheme.colorScheme.onSurface) },
-            text = { Text("Are you sure you want to remove \"${exerciseToDelete?.name}\" from this workout session?", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val ex = exerciseToDelete
-                        if (ex != null) {
-                            exercises.removeAll { it.workoutExerciseId == ex.workoutExerciseId }
-                            exerciseSetsMap.remove(ex.workoutExerciseId)
-                        }
-                        exerciseToDelete = null
-                    }
-                ) { Text("Remove", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { exerciseToDelete = null }) {
-                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(8.dp)
-        )
-    }
-
     if (activeSetRowForType != null) {
         ModalBottomSheet(onDismissRequest = { activeSetRowForType = null }, sheetState = sheetState, containerColor = MaterialTheme.colorScheme.surface) {
             val row = activeSetRowForType!!
@@ -726,21 +545,10 @@ fun WorkoutLoggingScreen(
                 SetTypeOption("standard", "Standard set", null, Color.White) { updateType("standard") }
                 SetTypeOption("warmup", "Warmup set", "W", Color(0xFFFFC107)) { updateType("warmup") }
                 SetTypeOption("failure", "Failure set", "F", Color(0xFFEF4444)) { updateType("failure") }
-                SetTypeOption("drop", "Drop set", "D", Color(0xFFA855F7)) { updateType("drop") }
+                SetTypeOption("drop", "Drop set", "D", Color(0xFF3B82F6)) { updateType("drop") }
                 SetTypeOption("back_off", "Back-off set", "B", Color(0xFF34D399)) { updateType("back_off") }
             }
         }
-    }
-
-    if (activeExerciseForPlates != null) {
-        val (exercise, initialWeight) = activeExerciseForPlates!!
-        val plates = (viewModel.userPlatesState.value as? UiState.Success)?.data ?: emptyList()
-        PlateMathBottomSheet(
-            exerciseName = exercise.name,
-            initialWeight = initialWeight,
-            plates = plates,
-            onDismiss = { activeExerciseForPlates = null }
-        )
     }
 
     if (activeExerciseForTimer != null) {
@@ -778,6 +586,29 @@ fun WorkoutLoggingScreen(
                 Button(onClick = { exerciseRestTimes[exercise.workoutExerciseId] = tempSeconds; activeExerciseForTimer = null }, modifier = Modifier.fillMaxWidth(0.8f), shape = RoundedCornerShape(8.dp)) { Text("Save Timer") }
             }
         }
+    }
+
+    if (showDiscardEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardEditDialog = false },
+            title = { Text("Discard exercise reordering?", color = MaterialTheme.colorScheme.onSurface) },
+            text = { Text("Changes to the exercise order will be lost.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        exercises.clear()
+                        exercises.addAll(initialExercisesBackup)
+                        showDiscardEditDialog = false
+                        isReordering = false
+                    }
+                ) { Text("Discard", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardEditDialog = false }) { Text("Keep Editing", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(8.dp)
+        )
     }
 
     if (showSyncDialog) {
@@ -832,293 +663,18 @@ fun WorkoutLoggingScreen(
     }
 }
 
-private fun formatPlateWeight(weight: Double): String {
-    return if (weight % 1.0 == 0.0) {
-        weight.toInt().toString()
-    } else {
-        String.format(Locale.US, "%.2f", weight).trimEnd('0').trimEnd('.')
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-private fun PlateMathBottomSheet(
-    exerciseName: String,
-    initialWeight: Double,
-    plates: List<UserPlate>,
-    onDismiss: () -> Unit
-) {
-    val smallestPlate = plates.filter { it.count > 0 }.minByOrNull { it.weightKg }?.weightKg
-    val minStep = if (smallestPlate != null && smallestPlate > 0.0) smallestPlate else 1.25
-
-    var weightText by remember {
-        mutableStateOf(if (initialWeight > 0.0) formatPlateWeight(initialWeight) else "0")
-    }
-
-    val currentWeight = weightText.toDoubleOrNull() ?: 0.0
-
-    val breakdown = remember(currentWeight, plates) {
-        PlateCalculator.calculatePlatesPerSide(currentWeight, plates)
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(exerciseName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        val next = maxOf(0.0, currentWeight - minStep)
-                        weightText = formatPlateWeight(next)
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Text("-${formatPlateWeight(minStep)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                }
-
-                Spacer(Modifier.width(12.dp))
-
-                OutlinedTextField(
-                    value = weightText,
-                    onValueChange = { weightText = it.filter { c -> c.isDigit() || c == '.' } },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.headlineMedium.copy(
-                        textAlign = TextAlign.Center,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentBlue
-                    ),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.width(130.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                    )
-                )
-
-                Spacer(Modifier.width(12.dp))
-
-                OutlinedButton(
-                    onClick = {
-                        val next = currentWeight + minStep
-                        weightText = formatPlateWeight(next)
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Text("+${formatPlateWeight(minStep)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-            ) {
-                Text(
-                    text = "Each side: ${formatPlateWeight(breakdown.perSideWeight)} kg",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                )
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            if (breakdown.platesPerSide.isEmpty() && breakdown.extraSinglePlate == null) {
-                Text(
-                    text = "No plates needed (0 kg)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 16.dp)
-                )
-            } else {
-                if (breakdown.platesPerSide.isNotEmpty()) {
-                    Text(
-                        text = "Plates on each side:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.align(Alignment.Start)
-                    )
-                    Spacer(Modifier.height(8.dp))
-
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        breakdown.platesPerSide.forEach { p ->
-                            Surface(
-                                shape = CircleShape,
-                                color = AccentBlue.copy(alpha = 0.15f),
-                                border = BorderStroke(1.dp, AccentBlue),
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = formatPlateWeight(p),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AccentBlue
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (breakdown.extraSinglePlate != null) {
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = "+ 1x Single plate (Pin / Center):",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFFFC107),
-                        modifier = Modifier.align(Alignment.Start)
-                    )
-                    Spacer(Modifier.height(8.dp))
-
-                    Surface(
-                        shape = CircleShape,
-                        color = Color(0xFFFFC107).copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, Color(0xFFFFC107)),
-                        modifier = Modifier
-                            .size(48.dp)
-                            .align(Alignment.Start)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = formatPlateWeight(breakdown.extraSinglePlate),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFFFC107)
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (breakdown.remainder > 0.05) {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = "Missing ${formatPlateWeight(breakdown.remainder)} kg (out of smaller plates)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun ExerciseLogContent(
     viewModel: AppViewModel,
     exercise: ExerciseInfo,
+    sets: SnapshotStateList<SetRowState>,
     restSeconds: Int,
     onRestTimeClick: () -> Unit,
-    onPlateCalculatorClick: (Double) -> Unit,
     onStartTimer: (Int) -> Unit,
     onCancelTimer: () -> Unit,
-    onOpenSetType: (SetRowState) -> Unit,
-    onSetsUpdated: (List<SetRowState>) -> Unit,
-    onPrAchieved: (String) -> Unit
+    onOpenSetType: (SetRowState) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-
-    val userPlates = (viewModel.userPlatesState.value as? UiState.Success)?.data ?: emptyList()
-    val algoSettings = (viewModel.algorithmSettingsState.value as? UiState.Success)?.data ?: UserAlgorithmSettings()
-
-    val sets = remember(exercise.workoutExerciseId) {
-        val initialList = mutableStateListOf<SetRowState>()
-        val templateCount = exercise.templateSets?.size ?: 0
-        val lastCount = exercise.lastSets?.size ?: 0
-        val totalCount = maxOf(1, maxOf(templateCount, lastCount))
-
-        val workingSets = exercise.lastSets?.filter { it.setNumber > 0 } ?: emptyList()
-        val baselineWeight = if (algoSettings.warmupBase == "heaviest_set") {
-            workingSets.maxOfOrNull { it.weightKg } ?: 0.0
-        } else {
-            workingSets.firstOrNull()?.weightKg ?: 0.0
-        }
-
-        val warmupTemplates = exercise.templateSets?.filter { it.setType == "warmup" } ?: emptyList()
-        val totalWarmups = warmupTemplates.size
-
-        for (i in 1..totalCount) {
-            val template = exercise.templateSets?.find { it.setNumber == i }
-            val prevSet = exercise.lastSets?.find { it.setNumber == i }
-            val currentType = template?.setType ?: "standard"
-
-            var calcWeight = prevSet?.weightKg ?: 0.0
-            var calcReps = prevSet?.reps ?: 0
-            var calcRir = prevSet?.rir ?: 0
-
-            when (currentType) {
-                "warmup" -> {
-                    if (algoSettings.warmupEnabled && baselineWeight > 0.0) {
-                        val warmupIndex = warmupTemplates.indexOf(template) + 1
-                        val fraction = if (totalWarmups <= 1) {
-                            0.60
-                        } else {
-                            0.50 + (0.35 * ((warmupIndex - 1).toDouble() / maxOf(1, totalWarmups - 1)))
-                        }
-                        val targetRaw = baselineWeight * fraction
-                        calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
-                        calcReps = if (totalWarmups <= 1) 5 else maxOf(1, 6 - (warmupIndex * 2) + 1)
-                        calcRir = 5
-                    }
-                }
-                "drop" -> {
-                    if (algoSettings.dropEnabled && baselineWeight > 0.0) {
-                        val targetRaw = baselineWeight * (1.0 - (algoSettings.dropPercentage / 100.0))
-                        calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
-                        calcRir = 0
-                    }
-                }
-                "back_off" -> {
-                    if (algoSettings.backoffEnabled && baselineWeight > 0.0) {
-                        val targetRaw = baselineWeight * (1.0 - (algoSettings.backoffPercentage / 100.0))
-                        calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
-                        calcRir = 1
-                    }
-                }
-            }
-
-            initialList.add(SetRowState(i).apply {
-                this.setType = currentType
-                if (calcWeight > 0.0) {
-                    this.fallbackWeight = if (calcWeight % 1.0 == 0.0) calcWeight.toInt().toString() else calcWeight.toString()
-                }
-                if (calcReps > 0) {
-                    this.fallbackReps = calcReps.toString()
-                }
-                if (calcRir >= 0 && (prevSet != null || currentType != "standard")) {
-                    this.fallbackRir = calcRir.toString()
-                }
-            })
-        }
-        initialList
-    }
-
-    LaunchedEffect(sets.size, sets.map { it.confirmed to it.weight }) {
-        onSetsUpdated(sets.toList())
-    }
 
     fun propagateFromFirstRow() {
         val first = sets.firstOrNull() ?: return
@@ -1129,62 +685,23 @@ private fun ExerciseLogContent(
                 row.rir = first.rir
             }
         }
-        onSetsUpdated(sets.toList())
-    }
-
-    fun resolveTargetPlateWeight(): Double {
-        val lastConfirmedWeight = sets.filter { it.confirmed }.lastOrNull()?.weight?.toDoubleOrNull()
-        if (lastConfirmedWeight != null && lastConfirmedWeight > 0.0) return lastConfirmedWeight
-
-        val activeRowWeight = sets.firstOrNull { !it.confirmed }?.weight?.toDoubleOrNull()
-        if (activeRowWeight != null && activeRowWeight > 0.0) return activeRowWeight
-
-        val firstRowFallback = sets.firstOrNull()?.fallbackWeight?.toDoubleOrNull()
-        if (firstRowFallback != null && firstRowFallback > 0.0) return firstRowFallback
-
-        val lastTrainingWeight = exercise.lastSets?.firstOrNull()?.weightKg
-        if (lastTrainingWeight != null && lastTrainingWeight > 0.0) return lastTrainingWeight
-
-        return 0.0
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         val timerInteractionSource = remember { MutableInteractionSource() }
         val isTimerPressed by timerInteractionSource.collectIsPressedAsState()
 
-        val plateInteractionSource = remember { MutableInteractionSource() }
-        val isPlatePressed by plateInteractionSource.collectIsPressedAsState()
-
         Row(
             modifier = Modifier
-                .padding(top = 4.dp, bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(top = 4.dp, bottom = 12.dp)
+                .clickable(interactionSource = timerInteractionSource, indication = null) { onRestTimeClick() }
+                .alpha(if (isTimerPressed) 0.4f else 1f)
+                .padding(vertical = 4.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier
-                    .clickable(interactionSource = timerInteractionSource, indication = null) { onRestTimeClick() }
-                    .alpha(if (isTimerPressed) 0.4f else 1f)
-                    .padding(vertical = 4.dp, horizontal = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Filled.Timer, contentDescription = "Rest", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(String.format(Locale.US, "%02d:%02d", restSeconds / 60, restSeconds % 60), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
-            }
-
-            Row(
-                modifier = Modifier
-                    .clickable(interactionSource = plateInteractionSource, indication = null) {
-                        onPlateCalculatorClick(resolveTargetPlateWeight())
-                    }
-                    .alpha(if (isPlatePressed) 0.4f else 1f)
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Filled.Balance, contentDescription = "Plates", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-            }
+            Icon(Icons.Filled.Timer, contentDescription = "Rest", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(String.format(Locale.US, "%02d:%02d", restSeconds / 60, restSeconds % 60), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
         }
 
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -1198,216 +715,156 @@ private fun ExerciseLogContent(
         Spacer(Modifier.height(8.dp))
 
         sets.forEachIndexed { rowIndex, row ->
-            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                val typeColor = when(row.setType) {
-                    "warmup" -> Color(0xFFFFC107)
-                    "failure" -> Color(0xFFEF4444)
-                    "back_off" -> Color(0xFF34D399)
-                    "drop" -> Color(0xFFA855F7)
-                    else -> AccentBlue
-                }
-                val typeInteractionSource = remember { MutableInteractionSource() }
-                val isTypePressed by typeInteractionSource.collectIsPressedAsState()
-
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .weight(0.6f)
-                        .clickable(interactionSource = typeInteractionSource, indication = null, enabled = !row.confirmed) { onOpenSetType(row) }
-                        .alpha(if (isTypePressed) 0.4f else 1f)
-                        .padding(vertical = 8.dp)
-                ) {
-                    if (row.confirmed && row.isPr) {
-                        Icon(
-                            imageVector = Icons.Filled.Stars,
-                            contentDescription = "PR Record",
-                            tint = typeColor,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    } else {
-                        Text(
-                            text = "${row.setNumber}",
-                            color = if (row.setType == "standard" && !row.confirmed) MaterialTheme.colorScheme.onSurface else typeColor,
-                            style = MaterialTheme.typography.titleMedium
-                        )
+            key(row.setNumber) {
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val typeColor = when(row.setType) {
+                        "warmup" -> Color(0xFFFFC107); "failure" -> Color(0xFFEF4444); "back_off" -> Color(0xFF34D399); "drop" -> Color(0xFF3B82F6); else -> MaterialTheme.colorScheme.onSurface
                     }
-                }
+                    val typeInteractionSource = remember { MutableInteractionSource() }
+                    val isTypePressed by typeInteractionSource.collectIsPressedAsState()
 
-                val rowTextColor = if (row.confirmed && row.isPr) typeColor else MaterialTheme.colorScheme.onSurface
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(0.6f)
+                            .clickable(interactionSource = typeInteractionSource, indication = null, enabled = !row.confirmed) { onOpenSetType(row) }
+                            .alpha(if (isTypePressed) 0.4f else 1f)
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Text("${row.setNumber}", color = typeColor, style = MaterialTheme.typography.titleMedium)
+                    }
 
-                OutlinedTextField(
-                    value = row.weight,
-                    onValueChange = { row.weight = it.filter { c -> c.isDigit() || c == '.' }; if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false; onSetsUpdated(sets.toList()) },
-                    enabled = !row.confirmed && !row.submitting,
-                    singleLine = true,
-                    placeholder = { if (row.fallbackWeight.isNotEmpty()) Text(row.fallbackWeight, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = rowTextColor,
-                        unfocusedTextColor = rowTextColor,
-                        disabledTextColor = rowTextColor,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                )
-                OutlinedTextField(
-                    value = row.reps,
-                    onValueChange = { row.reps = it.filter(Char::isDigit); if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false; onSetsUpdated(sets.toList()) },
-                    enabled = !row.confirmed && !row.submitting,
-                    singleLine = true,
-                    placeholder = { if (row.fallbackReps.isNotEmpty()) Text(row.fallbackReps, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = rowTextColor,
-                        unfocusedTextColor = rowTextColor,
-                        disabledTextColor = rowTextColor,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                )
-                OutlinedTextField(
-                    value = row.rir,
-                    onValueChange = { row.rir = it.filter(Char::isDigit); if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false },
-                    enabled = !row.confirmed && !row.submitting,
-                    singleLine = true,
-                    placeholder = { if (row.fallbackRir.isNotEmpty()) Text(row.fallbackRir, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = rowTextColor,
-                        unfocusedTextColor = rowTextColor,
-                        disabledTextColor = rowTextColor,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                )
+                    OutlinedTextField(
+                        value = row.weight,
+                        onValueChange = {
+                            row.weight = it.filter { c -> c.isDigit() || c == '.' }
+                            if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                        },
+                        enabled = !row.confirmed && !row.submitting,
+                        singleLine = true,
+                        placeholder = { if (row.fallbackWeight.isNotEmpty()) Text(row.fallbackWeight, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    OutlinedTextField(
+                        value = row.reps,
+                        onValueChange = {
+                            row.reps = it.filter(Char::isDigit)
+                            if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                        },
+                        enabled = !row.confirmed && !row.submitting,
+                        singleLine = true,
+                        placeholder = { if (row.fallbackReps.isNotEmpty()) Text(row.fallbackReps, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    OutlinedTextField(
+                        value = row.rir,
+                        onValueChange = {
+                            row.rir = it.filter(Char::isDigit)
+                            if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                        },
+                        enabled = !row.confirmed && !row.submitting,
+                        singleLine = true,
+                        placeholder = { if (row.fallbackRir.isNotEmpty()) Text(row.fallbackRir, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline),
+                        shape = RoundedCornerShape(8.dp)
+                    )
 
-                Row(modifier = Modifier.weight(0.9f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                    if (row.submitting) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        val checkRowSource = remember { MutableInteractionSource() }
-                        val isCheckRowPressed by checkRowSource.collectIsPressedAsState()
+                    Row(modifier = Modifier.weight(0.9f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        if (row.submitting) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            val checkRowSource = remember { MutableInteractionSource() }
+                            val isCheckRowPressed by checkRowSource.collectIsPressedAsState()
 
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = if (row.confirmed) AccentBlue else MaterialTheme.colorScheme.surfaceVariant,
-                            border = BorderStroke(1.dp, if (row.confirmed) AccentBlue else MaterialTheme.colorScheme.outline),
-                            modifier = Modifier
-                                .size(28.dp)
-                                .alpha(if (isCheckRowPressed) 0.4f else 1f)
-                                .clickable(
-                                    interactionSource = checkRowSource,
-                                    indication = null
-                                ) {
-                                    if (!row.confirmed) {
-                                        if (row.weight.isEmpty() && row.fallbackWeight.isNotEmpty()) row.weight = row.fallbackWeight
-                                        if (row.reps.isEmpty() && row.fallbackReps.isNotEmpty()) row.reps = row.fallbackReps
-                                        if (row.rir.isEmpty() && row.fallbackRir.isNotEmpty()) row.rir = row.fallbackRir
-
-                                        val reps = row.reps.toIntOrNull() ?: 0
-                                        val weight = row.weight.toDoubleOrNull() ?: 0.0
-
-                                        val current1RM = weight * (1.0 + (reps / 30.0))
-                                        val prevHistory1RM = exercise.lastSets?.maxOfOrNull { it.weightKg * (1.0 + (it.reps / 30.0)) } ?: 0.0
-                                        val currentWorkoutPrior1RM = sets.filter { it !== row && it.confirmed }.maxOfOrNull {
-                                            val w = it.weight.toDoubleOrNull() ?: 0.0
-                                            val r = it.reps.toIntOrNull() ?: 0
-                                            w * (1.0 + (r / 30.0))
-                                        } ?: 0.0
-
-                                        val benchmark1RM = maxOf(prevHistory1RM, currentWorkoutPrior1RM)
-                                        val isNewPr = if (benchmark1RM > 0.0) {
-                                            current1RM > benchmark1RM
-                                        } else {
-                                            weight > 0.0 && reps > 0
-                                        }
-
-                                        if (isNewPr && weight > 0.0 && reps > 0) {
-                                            row.isPr = true
-                                            val weightStr = if (weight % 1.0 == 0.0) weight.toInt().toString() else weight.toString()
-                                            onPrAchieved("${exercise.name}: $weightStr kg × $reps")
-                                        }
-
-                                        row.error = null
-                                        row.confirmed = true
-                                        row.submitting = true
-                                        onSetsUpdated(sets.toList())
-
-                                        val nextIndex = rowIndex + 1
-                                        val isNextSetDrop = if (nextIndex < sets.size) {
-                                            sets[nextIndex].setType == "drop"
-                                        } else false
-
-                                        if (isNextSetDrop) {
-                                            onCancelTimer()
-                                        } else {
-                                            onStartTimer(restSeconds)
-                                        }
-
-                                        val rir = row.rir.toIntOrNull() ?: 0
-                                        scope.launch {
-                                            val success = viewModel.logSet(exercise.workoutExerciseId, row.setNumber, reps, weight, rir, row.setType)
-                                            row.submitting = false
-                                            if (success) {
-                                                if (sets.last() === row) { sets.add(SetRowState(row.setNumber + 1)) }
-                                                onSetsUpdated(sets.toList())
-                                            } else {
-                                                row.confirmed = false
-                                                row.isPr = false
-                                                row.error = "Failed"
-                                                onSetsUpdated(sets.toList())
-                                            }
-                                        }
-                                    } else {
-                                        row.confirmed = false
-                                        row.isPr = false
-                                        onSetsUpdated(sets.toList())
-                                    }
-                                }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                if (row.confirmed) {
-                                    Icon(
-                                        Icons.Filled.Check,
-                                        contentDescription = "Confirmed",
-                                        tint = Color.Black,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        if (!row.confirmed && sets.size > 1) {
-                            val deleteSource = remember { MutableInteractionSource() }
-                            val isDeletePressed by deleteSource.collectIsPressedAsState()
-
-                            Box(
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (row.confirmed) AccentBlue else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (row.confirmed) AccentBlue else MaterialTheme.colorScheme.outline),
                                 modifier = Modifier
-                                    .padding(start = 4.dp)
-                                    .size(24.dp)
-                                    .alpha(if (isDeletePressed) 0.4f else 1f)
+                                    .size(28.dp)
+                                    .alpha(if (isCheckRowPressed) 0.4f else 1f)
                                     .clickable(
-                                        interactionSource = deleteSource,
+                                        interactionSource = checkRowSource,
                                         indication = null
                                     ) {
-                                        sets.remove(row)
-                                        sets.forEachIndexed { idx, s ->
-                                            s.setNumber = idx + 1
+                                        if (!row.confirmed) {
+                                            if (row.weight.isEmpty() && row.fallbackWeight.isNotEmpty()) row.weight = row.fallbackWeight
+                                            if (row.reps.isEmpty() && row.fallbackReps.isNotEmpty()) row.reps = row.fallbackReps
+                                            if (row.rir.isEmpty() && row.fallbackRir.isNotEmpty()) row.rir = row.fallbackRir
+
+                                            val reps = row.reps.toIntOrNull() ?: 0
+                                            val weight = row.weight.toDoubleOrNull() ?: 0.0
+                                            row.error = null
+
+                                            row.confirmed = true
+                                            row.submitting = true
+
+                                            val nextIndex = rowIndex + 1
+                                            val isNextSetDrop = if (nextIndex < sets.size) {
+                                                sets[nextIndex].setType == "drop"
+                                            } else false
+
+                                            if (isNextSetDrop) {
+                                                onCancelTimer()
+                                            } else {
+                                                onStartTimer(restSeconds)
+                                            }
+
+                                            val rir = row.rir.toIntOrNull() ?: 0
+                                            scope.launch {
+                                                val success = viewModel.logSet(exercise.workoutExerciseId, row.setNumber, reps, weight, rir, row.setType)
+                                                row.submitting = false
+                                                if (success) {
+                                                    if (sets.last() === row) {
+                                                        sets.add(SetRowState(row.setNumber + 1))
+                                                    }
+                                                } else {
+                                                    row.confirmed = false
+                                                    row.error = "Failed"
+                                                }
+                                            }
+                                        } else {
+                                            row.confirmed = false
                                         }
-                                        onSetsUpdated(sets.toList())
-                                    },
-                                contentAlignment = Alignment.Center
+                                    }
                             ) {
-                                Icon(Icons.Filled.Close, contentDescription = "Cancel", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (row.confirmed) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = "Confirmed",
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (!row.confirmed && sets.size > 1) {
+                                val deleteSource = remember { MutableInteractionSource() }
+                                val isDeletePressed by deleteSource.collectIsPressedAsState()
+
+                                Box(
+                                    modifier = Modifier
+                                        .padding(start = 4.dp)
+                                        .size(24.dp)
+                                        .alpha(if (isDeletePressed) 0.4f else 1f)
+                                        .clickable(
+                                            interactionSource = deleteSource,
+                                            indication = null
+                                        ) { sets.remove(row) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Filled.Close, contentDescription = "Cancel", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
                     }
@@ -1415,10 +872,7 @@ private fun ExerciseLogContent(
             }
         }
         TextButton(
-            onClick = {
-                sets.add(SetRowState((sets.maxOfOrNull { it.setNumber } ?: 0) + 1))
-                onSetsUpdated(sets.toList())
-            },
+            onClick = { sets.add(SetRowState((sets.maxOfOrNull { it.setNumber } ?: 0) + 1)) },
             modifier = Modifier.align(Alignment.End)
         ) { Text("+ Add set", color = MaterialTheme.colorScheme.primary) }
     }

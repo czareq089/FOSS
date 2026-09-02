@@ -13,17 +13,29 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var (
-	reMultipleNewlines = regexp.MustCompile(`\n{3,}`)
-	reXMLComments      = regexp.MustCompile(`<!--[\s\S]*?-->`)
-)
+var reMultipleNewlines = regexp.MustCompile(`\n{3,}`)
+
+// Bezpieczne usuwanie komentarzy XML bez podatności na Catastrophic Backtracking
+func removeXMLComments(s string) string {
+	for {
+		start := strings.Index(s, "<!--")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(s[start:], "-->")
+		if end == -1 {
+			break
+		}
+		s = s[:start] + s[start+end+3:]
+	}
+	return s
+}
 
 func cleanCodeContent(raw string, ext string) string {
 	cleaned := raw
 	if ext == ".xml" {
-		cleaned = reXMLComments.ReplaceAllString(cleaned, "")
+		cleaned = removeXMLComments(cleaned)
 	}
-	// Usunięcie nadmiarowych pustych linii
 	cleaned = reMultipleNewlines.ReplaceAllString(cleaned, "\n\n")
 	return strings.TrimSpace(cleaned)
 }
@@ -54,20 +66,19 @@ func dumpSchemaToString(dbPath string) string {
 }
 
 func scanDirectory(rootPath string) (string, error) {
-	// 1. Foldery całkowicie ignorowane
 	ignoreDirs := map[string]bool{
 		".git": true, ".idea": true, ".llm_context": true,
 		"database": true, "bin": true, "build": true, ".gradle": true,
-		"androidTest": true, "test": true, // Pomija domyślne testy
+		"androidTest": true, "test": true, ".cxx": true, "captures": true,
 	}
 
-	// 2. Dozwolone rozszerzenia
 	validExts := map[string]bool{
 		".go": true, ".html": true, ".kt": true,
 		".xml": true, ".sql": true, ".mod": true,
 	}
 
 	var sb strings.Builder
+	fileCount := 0
 
 	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -89,13 +100,19 @@ func scanDirectory(rootPath string) (string, error) {
 		cleanPath := filepath.ToSlash(path)
 		cleanPath = strings.TrimPrefix(cleanPath, "../")
 
-		// 3. Ignorowanie grafiki wektorowej XML i szablonów ikon
+		// Pomijanie zasobów XML (ikony, wektory) oprócz manifestu
 		if ext == ".xml" {
 			if strings.Contains(cleanPath, "drawable") || strings.Contains(cleanPath, "mipmap") || strings.Contains(cleanPath, "xml/") {
 				if !strings.HasSuffix(cleanPath, "AndroidManifest.xml") {
 					return nil
 				}
 			}
+		}
+
+		// Pomijanie zbyt dużych pojedynczych plików (np. powyżej 500 KB)
+		info, err := d.Info()
+		if err == nil && info.Size() > 512*1024 {
+			return nil
 		}
 
 		contentBytes, err := os.ReadFile(path)
@@ -113,9 +130,11 @@ func scanDirectory(rootPath string) (string, error) {
 		}
 
 		sb.WriteString(fmt.Sprintf("### %s\n```%s\n%s\n```\n\n", cleanPath, lang, sanitizedContent))
+		fileCount++
 		return nil
 	})
 
+	fmt.Printf("Przeskanowano %s: dodano %d plików.\n", rootPath, fileCount)
 	return sb.String(), err
 }
 
@@ -136,21 +155,26 @@ func main() {
 	includeBackend := dumpAll || *backendFlag
 	includeDB := !*noDbFlag
 
+	fmt.Println("Rozpoczynanie generowania kontekstu...")
+
 	if *separateFlag {
 		if includeDB {
 			dbContent := dumpSchemaToString(dbPath)
 			path := filepath.Join(outDir, fmt.Sprintf("schema_%s.md", timestamp))
 			_ = os.WriteFile(path, []byte("# F.O.S.S. - Database Schema\n\n"+dbContent), 0644)
+			fmt.Printf("Zapisano: %s\n", path)
 		}
 		if includeBackend {
 			content, _ := scanDirectory(".")
 			path := filepath.Join(outDir, fmt.Sprintf("backend_%s.md", timestamp))
 			_ = os.WriteFile(path, []byte("# F.O.S.S. - Backend Context\n\n"+content), 0644)
+			fmt.Printf("Zapisano: %s\n", path)
 		}
 		if includeAndroid {
 			content, _ := scanDirectory("../android")
 			path := filepath.Join(outDir, fmt.Sprintf("android_%s.md", timestamp))
 			_ = os.WriteFile(path, []byte("# F.O.S.S. - Android Context\n\n"+content), 0644)
+			fmt.Printf("Zapisano: %s\n", path)
 		}
 	} else {
 		var combined strings.Builder
@@ -177,6 +201,6 @@ func main() {
 
 		outPath := filepath.Join(outDir, fmt.Sprintf("context_%s_%s.md", suffix, timestamp))
 		_ = os.WriteFile(outPath, []byte(combined.String()), 0644)
-		fmt.Printf("Wygenerowano zoptymalizowany plik: %s\n", outPath)
+		fmt.Printf("Wygenerowano plik: %s\n", outPath)
 	}
 }
