@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import com.foss.app.AppViewModel
 import com.foss.app.UiState
 import com.foss.app.models.CreateProductRequest
@@ -507,6 +508,10 @@ private fun CustomEntryDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
         title = { Text("Custom Entry", color = MaterialTheme.colorScheme.onSurface) },
         text = {
             Column(
@@ -516,7 +521,8 @@ private fun CustomEntryDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Entry name *") },
+                    label = { Text("Entry name *", fontSize = 12.sp) },
+                    textStyle = MaterialTheme.typography.bodyMedium,
                     singleLine = true,
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -525,18 +531,23 @@ private fun CustomEntryDialog(
                 OutlinedTextField(
                     value = kcal,
                     onValueChange = { kcal = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("Calories (kcal) *") },
+                    label = { Text("Calories (kcal) *", fontSize = 12.sp) },
+                    textStyle = MaterialTheme.typography.bodyMedium,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     OutlinedTextField(
                         value = carbs,
                         onValueChange = { carbs = it.filter { c -> c.isDigit() || c == '.' } },
-                        label = { Text("Carbs") },
+                        label = { Text("Carbs", fontSize = 12.sp) },
+                        textStyle = MaterialTheme.typography.bodyMedium,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         shape = RoundedCornerShape(8.dp),
@@ -545,7 +556,8 @@ private fun CustomEntryDialog(
                     OutlinedTextField(
                         value = fat,
                         onValueChange = { fat = it.filter { c -> c.isDigit() || c == '.' } },
-                        label = { Text("Fat") },
+                        label = { Text("Fat", fontSize = 12.sp) },
+                        textStyle = MaterialTheme.typography.bodyMedium,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         shape = RoundedCornerShape(8.dp),
@@ -554,7 +566,8 @@ private fun CustomEntryDialog(
                     OutlinedTextField(
                         value = protein,
                         onValueChange = { protein = it.filter { c -> c.isDigit() || c == '.' } },
-                        label = { Text("Protein") },
+                        label = { Text("Protein", fontSize = 12.sp) },
+                        textStyle = MaterialTheme.typography.bodyMedium,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         shape = RoundedCornerShape(8.dp),
@@ -613,7 +626,8 @@ private fun EditLogAmountDialog(
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("Weight (grams)") },
+                    label = { Text("Weight (grams)", fontSize = 12.sp) },
+                    textStyle = MaterialTheme.typography.bodyMedium,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     shape = RoundedCornerShape(8.dp),
@@ -842,7 +856,8 @@ private fun AddFoodBottomSheet(
                 OutlinedTextField(
                     value = amountInput,
                     onValueChange = { amountInput = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text(if (inputMode == "servings") "Servings / Pieces" else "Weight (grams)") },
+                    label = { Text(if (inputMode == "servings") "Servings / Pieces" else "Weight (grams)", fontSize = 12.sp) },
+                    textStyle = MaterialTheme.typography.bodyMedium,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     shape = RoundedCornerShape(8.dp),
