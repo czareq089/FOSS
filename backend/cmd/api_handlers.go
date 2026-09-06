@@ -1996,15 +1996,30 @@ func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.Query(`
 		SELECT 
-			l.id, l.product_id, p.name, l.amount,
-			COALESCE(p.kcal, 0) * (l.amount / 100.0) as calculated_kcal,
-			COALESCE(p.protein, 0) * (l.amount / 100.0) as calculated_p,
-			COALESCE(p.fat, 0) * (l.amount / 100.0) as calculated_f,
-			COALESCE(p.carbs, 0) * (l.amount / 100.0) as calculated_c,
+			l.id, 
+			COALESCE(l.product_id, 0), 
+			COALESCE(p.name, l.custom_name, 'Custom entry'), 
+			l.amount,
+			CASE 
+				WHEN l.product_id IS NOT NULL THEN COALESCE(p.kcal, 0) * (l.amount / 100.0)
+				ELSE COALESCE(l.kcal, 0) * (l.amount / 100.0)
+			END as calculated_kcal,
+			CASE 
+				WHEN l.product_id IS NOT NULL THEN COALESCE(p.protein, 0) * (l.amount / 100.0)
+				ELSE COALESCE(l.protein, 0) * (l.amount / 100.0)
+			END as calculated_p,
+			CASE 
+				WHEN l.product_id IS NOT NULL THEN COALESCE(p.fat, 0) * (l.amount / 100.0)
+				ELSE COALESCE(l.fat, 0) * (l.amount / 100.0)
+			END as calculated_f,
+			CASE 
+				WHEN l.product_id IS NOT NULL THEN COALESCE(p.carbs, 0) * (l.amount / 100.0)
+				ELSE COALESCE(l.carbs, 0) * (l.amount / 100.0)
+			END as calculated_c,
 			strftime('%H:%M', l.logged_at) as log_time,
 			p.serving_size
 		FROM diet_logs l
-		JOIN diet_products p ON p.id = l.product_id
+		LEFT JOIN diet_products p ON p.id = l.product_id
 		WHERE l.user_id = ? AND date(l.logged_at) = date(?)
 		ORDER BY l.logged_at DESC, l.id DESC`, userID, dateStr)
 
@@ -2101,44 +2116,23 @@ func handleAPICustomDietLog(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	tx, err := db.Begin()
-	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
-		return
-	}
-
-	res, err := tx.Exec(`
-		INSERT INTO diet_products (name, brand, package_weight, serving_size, kcal, protein, fat, carbs)
-		VALUES (?, 'Custom', 100.0, 100.0, ?, ?, ?, ?)`,
-		strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs)
-	if err != nil {
-		tx.Rollback()
-		http.Error(w, "Failed to insert custom product: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	newProdID, _ := res.LastInsertId()
+	var query string
+	var args []interface{}
 
 	if req.Date != "" && req.Date != "now" {
-		_, err = tx.Exec(`
-			INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
-			VALUES (?, ?, 100.0, datetime(?, '12:00:00'))`,
-			req.UserID, newProdID, req.Date)
+		query = `
+			INSERT INTO diet_logs (user_id, product_id, custom_name, amount, kcal, protein, fat, carbs, logged_at) 
+			VALUES (?, NULL, ?, 100.0, ?, ?, ?, ?, datetime(?, '12:00:00'))`
+		args = []interface{}{req.UserID, strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs, req.Date}
 	} else {
-		_, err = tx.Exec(`
-			INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
-			VALUES (?, ?, 100.0, datetime('now'))`,
-			req.UserID, newProdID)
+		query = `
+			INSERT INTO diet_logs (user_id, product_id, custom_name, amount, kcal, protein, fat, carbs, logged_at) 
+			VALUES (?, NULL, ?, 100.0, ?, ?, ?, ?, datetime('now'))`
+		args = []interface{}{req.UserID, strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs}
 	}
 
-	if err != nil {
-		tx.Rollback()
+	if _, err := db.Exec(query, args...); err != nil {
 		http.Error(w, "Failed to log custom entry: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if err := tx.Commit(); err != nil {
-		http.Error(w, "Failed to commit", http.StatusInternalServerError)
 		return
 	}
 
