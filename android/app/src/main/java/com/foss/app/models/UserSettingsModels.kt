@@ -19,7 +19,24 @@ data class UserAlgorithmSettings(
     @SerializedName("drop_enabled") val dropEnabled: Boolean = true,
     @SerializedName("drop_percentage") val dropPercentage: Double = 20.0,
     @SerializedName("backoff_enabled") val backoffEnabled: Boolean = true,
-    @SerializedName("backoff_percentage") val backoffPercentage: Double = 10.0
+    @SerializedName("backoff_percentage") val backoffPercentage: Double = 10.0,
+    @SerializedName("show_rir") val showRIR: Boolean = true
+)
+
+data class WeightHistoryPoint(
+    @SerializedName("date") val date: String,
+    @SerializedName("weight_kg") val weightKg: Double
+)
+
+data class DailyMetricsToday(
+    @SerializedName("date") val date: String,
+    @SerializedName("steps_count") val stepsCount: Int,
+    @SerializedName("weight_kg") val weightKg: Double?
+)
+
+data class UpdateStepsReq(
+    @SerializedName("user_id") val userId: Int = 1,
+    @SerializedName("steps_count") val stepsCount: Int
 )
 
 data class PlateBreakdown(

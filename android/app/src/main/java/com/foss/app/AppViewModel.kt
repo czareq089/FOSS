@@ -55,6 +55,12 @@ class AppViewModel : ViewModel() {
     var dietProductsState = mutableStateOf<UiState<List<DietProduct>>>(UiState.Idle)
         private set
 
+    var weightHistoryState = mutableStateOf<UiState<List<WeightHistoryPoint>>>(UiState.Idle)
+        private set
+
+    var todayMetricsState = mutableStateOf<UiState<DailyMetricsToday>>(UiState.Idle)
+        private set
+
     fun loadRoutines() {
         viewModelScope.launch {
             if (routinesState.value !is UiState.Success) {
@@ -439,8 +445,48 @@ class AppViewModel : ViewModel() {
             if (res.isSuccessful) {
                 userDietSettingsState.value = UiState.Success(settings)
                 loadDietData()
+                loadWeightHistory()
                 true
             } else false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun loadWeightHistory() {
+        viewModelScope.launch {
+            weightHistoryState.value = UiState.Loading
+            try {
+                val res = api.getWeightHistory(currentUserId)
+                weightHistoryState.value = if (res.isSuccessful && res.body() != null) {
+                    UiState.Success(res.body()!!)
+                } else {
+                    UiState.Success(emptyList())
+                }
+            } catch (e: Exception) {
+                weightHistoryState.value = UiState.Error(e.message ?: "Failed to load weight history")
+            }
+        }
+    }
+
+    fun loadDailyMetricsToday() {
+        viewModelScope.launch {
+            try {
+                val res = api.getDailyMetricsToday(currentUserId)
+                if (res.isSuccessful && res.body() != null) {
+                    todayMetricsState.value = UiState.Success(res.body()!!)
+                }
+            } catch (e: Exception) {
+                todayMetricsState.value = UiState.Error(e.message ?: "Failed to load today metrics")
+            }
+        }
+    }
+
+    suspend fun saveDailySteps(steps: Int): Boolean {
+        return try {
+            val ok = api.updateDailySteps(UpdateStepsReq(currentUserId, steps)).isSuccessful
+            if (ok) loadDailyMetricsToday()
+            ok
         } catch (e: Exception) {
             false
         }
@@ -488,32 +534,33 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    suspend fun logFood(productId: Int, amountG: Double): Boolean {
+    suspend fun logFood(productId: Int, amountG: Double, date: String = "now"): Boolean {
         return try {
-            val ok = api.logDietFood(LogDietRequest(currentUserId, productId, amountG)).isSuccessful
+            val dateParam = if (date == "now") null else date
+            val ok = api.logDietFood(LogDietRequest(currentUserId, productId, amountG, dateParam)).isSuccessful
             if (ok) {
-                loadDietData()
+                loadDietData(date)
                 loadDietConsistencyStats()
             }
             ok
         } catch (e: Exception) { false }
     }
 
-    suspend fun createProduct(req: CreateProductRequest): DietProduct? {
+    suspend fun createProduct(req: CreateProductRequest, date: String = "now"): DietProduct? {
         return try {
             val res = api.createDietProduct(req)
             if (res.isSuccessful && res.body() != null) {
-                loadDietData()
+                loadDietData(date)
                 res.body()
             } else null
         } catch (e: Exception) { null }
     }
 
-    suspend fun deleteFoodLog(logId: Int): Boolean {
+    suspend fun deleteFoodLog(logId: Int, date: String = "now"): Boolean {
         return try {
             val ok = api.deleteDietLog(logId).isSuccessful
             if (ok) {
-                loadDietData()
+                loadDietData(date)
                 loadDietConsistencyStats()
             }
             ok

@@ -54,7 +54,8 @@ data class DailyDietSummary(
 data class LogDietRequest(
     @SerializedName("user_id") val userId: Int = 1,
     @SerializedName("product_id") val productId: Int,
-    @SerializedName("amount") val amount: Double
+    @SerializedName("amount") val amount: Double,
+    @SerializedName("date") val date: String? = null
 )
 
 data class CreateProductRequest(

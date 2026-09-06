@@ -207,6 +207,7 @@ fun WorkoutLoggingScreen(
 
     val userPlates = (viewModel.userPlatesState.value as? UiState.Success)?.data ?: emptyList()
     val algoSettings = (viewModel.algorithmSettingsState.value as? UiState.Success)?.data ?: UserAlgorithmSettings()
+    val showRir = algoSettings.showRIR
 
     Scaffold(
         topBar = {
@@ -409,7 +410,6 @@ fun WorkoutLoggingScreen(
                         val currentOffset = listState.layoutInfo.visibleItemsInfo.find { it.index == index }?.offset ?: 0
                         val compensationOffset = if (isDragged) (initialItemOffset - currentOffset).toFloat() else 0f
 
-                        // Inicjalizacja DOKŁADNIE tylu serii, ile zdefiniowano w edycji rutyny (templateSets)
                         val setsList = exerciseSetsMap.getOrPut(exercise.workoutExerciseId) {
                             val initialList = mutableStateListOf<SetRowState>()
                             val templateSets = exercise.templateSets ?: emptyList()
@@ -623,6 +623,7 @@ fun WorkoutLoggingScreen(
                                             exercise = exercise,
                                             sets = setsList,
                                             restSeconds = currentRestTime,
+                                            showRir = showRir,
                                             onRestTimeClick = { activeExerciseForTimer = exercise },
                                             onPlateCalculatorClick = { currentWeight ->
                                                 activeExerciseForPlates = Pair(exercise, currentWeight)
@@ -1102,6 +1103,7 @@ private fun ExerciseLogContent(
     exercise: ExerciseInfo,
     sets: SnapshotStateList<SetRowState>,
     restSeconds: Int,
+    showRir: Boolean,
     onRestTimeClick: () -> Unit,
     onPlateCalculatorClick: (Double) -> Unit,
     onStartTimer: (Int) -> Unit,
@@ -1187,7 +1189,9 @@ private fun ExerciseLogContent(
             Text("Set", modifier = Modifier.weight(0.6f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Weight", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("RIR", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (showRir) {
+                Text("RIR", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Spacer(modifier = Modifier.weight(0.9f))
         }
 
@@ -1274,27 +1278,29 @@ private fun ExerciseLogContent(
                         ),
                         shape = RoundedCornerShape(8.dp)
                     )
-                    OutlinedTextField(
-                        value = row.rir,
-                        onValueChange = {
-                            row.rir = it.filter(Char::isDigit)
-                            if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
-                        },
-                        enabled = !row.confirmed && !row.submitting,
-                        singleLine = true,
-                        placeholder = { if (row.fallbackRir.isNotEmpty()) Text(row.fallbackRir, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = rowTextColor,
-                            unfocusedTextColor = rowTextColor,
-                            disabledTextColor = rowTextColor,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                            disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                        ),
-                        shape = RoundedCornerShape(8.dp)
-                    )
+                    if (showRir) {
+                        OutlinedTextField(
+                            value = row.rir,
+                            onValueChange = {
+                                row.rir = it.filter(Char::isDigit)
+                                if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                            },
+                            enabled = !row.confirmed && !row.submitting,
+                            singleLine = true,
+                            placeholder = { if (row.fallbackRir.isNotEmpty()) Text(row.fallbackRir, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = rowTextColor,
+                                unfocusedTextColor = rowTextColor,
+                                disabledTextColor = rowTextColor,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                    }
 
                     Row(modifier = Modifier.weight(0.9f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                         if (row.submitting) {
@@ -1358,7 +1364,7 @@ private fun ExerciseLogContent(
                                                 onStartTimer(restSeconds)
                                             }
 
-                                            val rir = row.rir.toIntOrNull() ?: 0
+                                            val rir = if (showRir) (row.rir.toIntOrNull() ?: 0) else 0
                                             scope.launch {
                                                 val success = viewModel.logSet(exercise.workoutExerciseId, row.setNumber, reps, weight, rir, row.setType)
                                                 row.submitting = false

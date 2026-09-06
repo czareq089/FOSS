@@ -17,13 +17,28 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.foss.app.AppViewModel
 import com.foss.app.UiState
 import com.foss.app.models.UserDietSettings
 import com.foss.app.ui.theme.AccentBlue
+import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLine
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
+import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.compose.common.fill
+import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,9 +48,11 @@ fun DietSettingsScreen(
 ) {
     LaunchedEffect(Unit) {
         viewModel.loadUserDietSettings()
+        viewModel.loadWeightHistory()
     }
 
     val state = viewModel.userDietSettingsState.value
+    val weightHistoryState = viewModel.weightHistoryState.value
     val scope = rememberCoroutineScope()
     var isSaving by remember { mutableStateOf(false) }
 
@@ -57,6 +74,31 @@ fun DietSettingsScreen(
             targetProteinInput = d.targetProtein.toInt().toString()
             targetFatInput = d.targetFat.toInt().toString()
             targetCarbsInput = d.targetCarbs.toInt().toString()
+        }
+    }
+
+    val modelProducer = remember { CartesianChartModelProducer() }
+    val history = (weightHistoryState as? UiState.Success)?.data ?: emptyList()
+    val targetWeight = targetWeightInput.toDoubleOrNull() ?: 78.0
+
+    LaunchedEffect(history, targetWeight, currentWeightInput) {
+        val currentWeight = currentWeightInput.toDoubleOrNull() ?: 70.0
+        val points = if (history.isEmpty()) {
+            listOf(currentWeight.toFloat())
+        } else {
+            history.map { it.weightKg.toFloat() }
+        }
+
+        val baseSeries = if (points.size == 1) listOf(points[0], points[0]) else points
+        val targetSeries = List(baseSeries.size) { targetWeight.toFloat() }
+
+        withContext(Dispatchers.Default) {
+            modelProducer.runTransaction {
+                lineSeries {
+                    series(baseSeries)
+                    series(targetSeries)
+                }
+            }
         }
     }
 
@@ -171,6 +213,59 @@ fun DietSettingsScreen(
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+
+                        OutlinedCard(
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Weight Progress", style = MaterialTheme.typography.titleMedium)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(shape = RoundedCornerShape(2.dp), color = AccentBlue, modifier = Modifier.size(10.dp)) {}
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Weight", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(shape = RoundedCornerShape(2.dp), color = Color(0xFF34D399), modifier = Modifier.size(10.dp)) {}
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Target", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+
+                                Spacer(Modifier.height(14.dp))
+
+                                Box(modifier = Modifier.fillMaxWidth().height(160.dp)) {
+                                    CartesianChartHost(
+                                        chart = rememberCartesianChart(
+                                            rememberLineCartesianLayer(
+                                                lineProvider = LineCartesianLayer.LineProvider.series(
+                                                    rememberLine(
+                                                        fill = LineCartesianLayer.LineFill.single(fill(AccentBlue)),
+                                                        pointConnector = LineCartesianLayer.PointConnector.cubic(curvature = 0f)
+                                                    ),
+                                                    rememberLine(
+                                                        fill = LineCartesianLayer.LineFill.single(fill(Color(0xFF34D399))),
+                                                        thickness = 1.5.dp
+                                                    )
+                                                )
+                                            ),
+                                            startAxis = rememberStartAxis(),
+                                            bottomAxis = rememberBottomAxis()
+                                        ),
+                                        modelProducer = modelProducer,
+                                        modifier = Modifier.fillMaxSize()
                                     )
                                 }
                             }

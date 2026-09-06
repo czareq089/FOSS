@@ -273,6 +273,7 @@ type LogDietReq struct {
 	UserID    int     `json:"user_id"`
 	ProductID int     `json:"product_id"`
 	AmountG   float64 `json:"amount"`
+	Date      string  `json:"date,omitempty"` // format: YYYY-MM-DD
 }
 
 type DietLogItem struct {
@@ -407,11 +408,11 @@ func handleAPILogSet(w http.ResponseWriter, r *http.Request) {
 
 	if exists {
 		_, err = db.Exec(`UPDATE training_workout_sets SET reps = ?, weight_kg = ?, rir = ?, set_type = ? 
-						  WHERE workout_exercise_id = ? AND set_number = ?`,
+							WHERE workout_exercise_id = ? AND set_number = ?`,
 			req.Reps, req.WeightKg, req.RIR, req.SetType, req.WorkoutExerciseID, req.SetNumber)
 	} else {
 		_, err = db.Exec(`INSERT INTO training_workout_sets (workout_exercise_id, set_number, reps, weight_kg, rir, set_type) 
-						  VALUES (?, ?, ?, ?, ?, ?)`,
+							VALUES (?, ?, ?, ?, ?, ?)`,
 			req.WorkoutExerciseID, req.SetNumber, req.Reps, req.WeightKg, req.RIR, req.SetType)
 	}
 
@@ -956,7 +957,6 @@ func handleAPIRoutineExerciseAdd(w http.ResponseWriter, r *http.Request) {
 
 	newReID, _ := res.LastInsertId()
 
-	// Automatycznie wstawiamy 3 domyślne serie do szablonu nowo dodanego ćwiczenia
 	for s := 1; s <= 3; s++ {
 		_, err = tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, 'standard')`, newReID, s)
 		if err != nil {
@@ -1688,7 +1688,6 @@ func handleAPIGetDailyMetricsToday(w http.ResponseWriter, r *http.Request) {
 		Scan(&resp.Date, &resp.StepsCount, &resp.WeightKg)
 
 	if err == sql.ErrNoRows {
-		// Dziś jeszcze brak wpisu – zwracamy 0 kroków
 		_ = db.QueryRow(`SELECT date('now')`).Scan(&resp.Date)
 	} else if err != nil {
 		http.Error(w, "Query error: "+err.Error(), http.StatusInternalServerError)
@@ -2040,10 +2039,20 @@ func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	_, err = db.Exec(`INSERT INTO diet_logs (user_id, product_id, amount) VALUES (?, ?, ?)`,
-		req.UserID, req.ProductID, req.AmountG)
+	if req.Date != "" && req.Date != "now" {
+		_, err = db.Exec(`
+			INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
+			VALUES (?, ?, ?, datetime(?, '12:00:00'))`,
+			req.UserID, req.ProductID, req.AmountG, req.Date)
+	} else {
+		_, err = db.Exec(`
+			INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
+			VALUES (?, ?, ?, datetime('now'))`,
+			req.UserID, req.ProductID, req.AmountG)
+	}
+
 	if err != nil {
-		http.Error(w, "Failed to log food", http.StatusInternalServerError)
+		http.Error(w, "Failed to log food: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

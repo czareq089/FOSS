@@ -133,4 +133,13 @@ interface FossApi {
 
     @DELETE("/api/diet/log/delete")
     suspend fun deleteDietLog(@Query("id") logId: Int): Response<Unit>
+
+    @GET("/api/user/weight/history")
+    suspend fun getWeightHistory(@Query("user_id") userId: Int = 1): Response<List<WeightHistoryPoint>>
+
+    @GET("/api/user/daily-metrics/today")
+    suspend fun getDailyMetricsToday(@Query("user_id") userId: Int = 1): Response<DailyMetricsToday>
+
+    @POST("/api/user/daily-metrics/steps")
+    suspend fun updateDailySteps(@Body request: UpdateStepsReq): Response<Unit>
 }

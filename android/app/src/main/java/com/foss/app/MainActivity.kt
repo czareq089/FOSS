@@ -34,6 +34,7 @@ import com.foss.app.screens.DietSettingsScreen
 import com.foss.app.screens.EquipmentScreen
 import com.foss.app.screens.ExerciseDetailScreen
 import com.foss.app.screens.ExerciseSelectionScreen
+import com.foss.app.screens.PreferencesScreen
 import com.foss.app.screens.ProfileSettingsScreen
 import com.foss.app.screens.RoutineDetailScreen
 import com.foss.app.screens.TrainingScreen
@@ -254,6 +255,9 @@ fun FossApp() {
             composable("profileSettings") {
                 ProfileSettingsScreen(
                     viewModel = viewModel,
+                    onNavigateToPreferences = {
+                        navController.navigate("preferences")
+                    },
                     onNavigateToEquipment = {
                         navController.navigate("equipment")
                     },
@@ -263,6 +267,13 @@ fun FossApp() {
                     onNavigateToDietSettings = {
                         navController.navigate("dietSettings")
                     },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable("preferences") {
+                PreferencesScreen(
+                    viewModel = viewModel,
                     onBack = { navController.popBackStack() }
                 )
             }

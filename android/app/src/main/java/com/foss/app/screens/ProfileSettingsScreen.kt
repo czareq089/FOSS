@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +37,7 @@ fun ProfileSettingsScreen(
     onNavigateToEquipment: () -> Unit,
     onNavigateToAutomation: () -> Unit,
     onNavigateToDietSettings: () -> Unit,
+    onNavigateToPreferences: () -> Unit,
     onBack: () -> Unit
 ) {
     LaunchedEffect(Unit) {
@@ -178,6 +180,13 @@ fun ProfileSettingsScreen(
             }
 
             Spacer(Modifier.height(4.dp))
+
+            SettingsItemCard(
+                title = "Preferences",
+                subtitle = "Workout logging & display options",
+                icon = Icons.Filled.Tune,
+                onClick = onNavigateToPreferences
+            )
 
             SettingsItemCard(
                 title = "Equipment & Plates",

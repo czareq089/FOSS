@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
@@ -31,19 +33,27 @@ import com.foss.app.models.DietLogEntry
 import com.foss.app.models.DietProduct
 import com.foss.app.ui.theme.AccentBlue
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val CarbsColor = Color(0xFF34D399)   // Green
-private val FatsColor = Color(0xFFFFC107)    // Yellow
-private val ProteinColor = Color(0xFFEF4444) // Red
+private val CarbsColor = Color(0xFF34D399)
+private val FatsColor = Color(0xFFFFC107)
+private val ProteinColor = Color(0xFFEF4444)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DietScreen(
     viewModel: AppViewModel
 ) {
-    LaunchedEffect(Unit) {
-        viewModel.loadDietData()
+    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
+    val isToday = remember(selectedDate) { selectedDate.isEqual(LocalDate.now()) }
+    val currentDateParam = remember(selectedDate) {
+        if (selectedDate.isEqual(LocalDate.now())) "now" else selectedDate.toString()
+    }
+
+    LaunchedEffect(selectedDate) {
+        viewModel.loadDietData(currentDateParam)
     }
 
     val summaryState = viewModel.dietSummaryState.value
@@ -53,6 +63,15 @@ fun DietScreen(
     var showFoodSheet by remember { mutableStateOf(false) }
     var showAddProductDialog by remember { mutableStateOf(false) }
     var prefillProductName by remember { mutableStateOf("") }
+
+    val dateDisplayTitle = remember(selectedDate) {
+        val today = LocalDate.now()
+        when {
+            selectedDate.isEqual(today) -> "Today"
+            selectedDate.isEqual(today.minusDays(1)) -> "Yesterday"
+            else -> selectedDate.format(DateTimeFormatter.ofPattern("EEE, d MMM", Locale.US))
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -102,7 +121,9 @@ fun DietScreen(
                     ) {
                         Text(summaryState.message, color = MaterialTheme.colorScheme.error)
                         Spacer(Modifier.height(8.dp))
-                        Button(onClick = { viewModel.loadDietData() }) { Text("Retry") }
+                        Button(onClick = {
+                            viewModel.loadDietData(currentDateParam)
+                        }) { Text("Retry") }
                     }
                 }
                 is UiState.Success -> {
@@ -112,6 +133,55 @@ fun DietScreen(
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    IconButton(
+                                        onClick = { selectedDate = selectedDate.minusDays(1) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.ArrowBackIos,
+                                            contentDescription = "Previous Day",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
+                                    Text(
+                                        text = dateDisplayTitle,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isToday) AccentBlue else MaterialTheme.colorScheme.onSurface
+                                    )
+
+                                    IconButton(
+                                        onClick = { if (!isToday) selectedDate = selectedDate.plusDays(1) },
+                                        enabled = !isToday,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                            contentDescription = "Next Day",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (!isToday) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         item {
                             MacrosOverviewCard(summary = summary)
                         }
@@ -128,7 +198,7 @@ fun DietScreen(
                         if (summary.logs.isEmpty()) {
                             item {
                                 Text(
-                                    text = "No food logged yet today.",
+                                    text = "No food logged for this day.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(vertical = 16.dp)
@@ -140,7 +210,7 @@ fun DietScreen(
                                     log = log,
                                     onDelete = {
                                         scope.launch {
-                                            viewModel.deleteFoodLog(log.id)
+                                            viewModel.deleteFoodLog(log.id, currentDateParam)
                                         }
                                     }
                                 )
@@ -184,7 +254,7 @@ fun DietScreen(
             },
             onFoodLogged = { product, finalGrams ->
                 scope.launch {
-                    viewModel.logFood(product.id, finalGrams)
+                    viewModel.logFood(product.id, finalGrams, currentDateParam)
                 }
                 showFoodSheet = false
             }
@@ -197,7 +267,7 @@ fun DietScreen(
             onDismiss = { showAddProductDialog = false },
             onProductAdded = { req ->
                 scope.launch {
-                    viewModel.createProduct(req)
+                    viewModel.createProduct(req, currentDateParam)
                     showAddProductDialog = false
                     showFoodSheet = true
                 }
