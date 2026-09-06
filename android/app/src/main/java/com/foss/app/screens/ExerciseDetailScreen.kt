@@ -20,8 +20,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.foss.app.UiState
 import com.foss.app.AppViewModel
+import com.foss.app.UiState
 import com.foss.app.models.ExerciseDetailAnalytics
 import com.foss.app.models.ExerciseHistoryPoint
 import com.foss.app.ui.theme.AccentBlue
@@ -154,9 +154,10 @@ private fun AnalyticsContent(
                     ChartMetric.ONE_RM -> pt.estOneRM.toFloat()
                 }
             }
-            val baseSeries = if (rawValues.size == 1) listOf(0f, rawValues[0]) else rawValues
+            // Brak zera: przy 1 punkcie powielamy realną wartość
+            val baseSeries = if (rawValues.size == 1) listOf(rawValues[0], rawValues[0]) else rawValues
             val maxVal = baseSeries.maxOrNull() ?: 0f
-            val targetCeiling = if (maxVal > 0f) maxVal * 2.0f else 10f
+            val targetCeiling = if (maxVal > 0f) maxVal * 1.25f else 10f
             val ceilingSeries = List(baseSeries.size) { targetCeiling }
 
             withContext(Dispatchers.Default) {

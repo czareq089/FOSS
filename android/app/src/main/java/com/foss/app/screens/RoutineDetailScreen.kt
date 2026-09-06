@@ -138,7 +138,6 @@ fun RoutineDetailScreen(
                                         }
                                         viewModel.reorderExercises(routineId, positions)
 
-                                        // KLUCZOWY FIX: Zapisujemy serie z mutableTemplateSets (czyli to co ustawił użytkownik)
                                         exercises.forEach { ex ->
                                             val currentSets = ex.mutableTemplateSets.toList()
                                             val safeSets = if (currentSets.isNotEmpty()) {
@@ -284,7 +283,8 @@ private fun RoutineVolumeChartCard(state: UiState<com.foss.app.models.RoutineAna
     LaunchedEffect(history) {
         if (history.isNotEmpty()) {
             val rawValues: List<Float> = history.map { it.volumeKg.toFloat() }
-            val baseSeries = if (rawValues.size == 1) listOf(0f, rawValues[0]) else rawValues
+            // Brak zera: przy 1 punkcie powielamy realną wartość
+            val baseSeries = if (rawValues.size == 1) listOf(rawValues[0], rawValues[0]) else rawValues
             val maxVal = baseSeries.maxOrNull() ?: 0f
             val targetCeiling = if (maxVal > 0f) maxVal * 1.25f else 10f
             val ceilingSeries = List(baseSeries.size) { targetCeiling }
@@ -349,7 +349,7 @@ private fun RoutineVolumeChartCard(state: UiState<com.foss.app.models.RoutineAna
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(150.dp)
+                            .height(180.dp)
                             .onSizeChanged { chartWidth = maxOf(1, it.width) }
                             .pointerInput(history) {
                                 detectTapGestures { offset ->
