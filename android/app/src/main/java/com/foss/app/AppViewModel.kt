@@ -428,13 +428,13 @@ class AppViewModel : ViewModel() {
             userDietSettingsState.value = UiState.Loading
             try {
                 val res = api.getUserDietSettings(currentUserId)
-                userDietSettingsState.value = if (res.isSuccessful && res.body() != null) {
-                    UiState.Success(res.body()!!)
+                if (res.isSuccessful && res.body() != null) {
+                    userDietSettingsState.value = UiState.Success(res.body()!!)
                 } else {
-                    UiState.Success(UserDietSettings(userId = currentUserId))
+                    userDietSettingsState.value = UiState.Error("Failed to fetch settings from server")
                 }
             } catch (e: Exception) {
-                userDietSettingsState.value = UiState.Success(UserDietSettings(userId = currentUserId))
+                userDietSettingsState.value = UiState.Error(e.message ?: "Connection error")
             }
         }
     }
@@ -538,6 +538,39 @@ class AppViewModel : ViewModel() {
         return try {
             val dateParam = if (date == "now") null else date
             val ok = api.logDietFood(LogDietRequest(currentUserId, productId, amountG, dateParam)).isSuccessful
+            if (ok) {
+                loadDietData(date)
+                loadDietConsistencyStats()
+            }
+            ok
+        } catch (e: Exception) { false }
+    }
+
+    suspend fun logCustomEntry(name: String, kcal: Double, carbs: Double, protein: Double, fat: Double, date: String = "now"): Boolean {
+        return try {
+            val dateParam = if (date == "now") null else date
+            val req = CustomDietEntryRequest(
+                userId = currentUserId,
+                name = name,
+                kcal = kcal,
+                carbs = carbs,
+                protein = protein,
+                fat = fat,
+                date = dateParam
+            )
+            val ok = api.logCustomDietEntry(req).isSuccessful
+            if (ok) {
+                loadDietData(date)
+                loadDietConsistencyStats()
+            }
+            ok
+        } catch (e: Exception) { false }
+    }
+
+    suspend fun updateLogAmount(logId: Int, newAmountG: Double, date: String = "now"): Boolean {
+        return try {
+            val req = UpdateDietLogAmountRequest(logId = logId, amount = newAmountG)
+            val ok = api.updateDietLogAmount(req).isSuccessful
             if (ok) {
                 loadDietData(date)
                 loadDietConsistencyStats()

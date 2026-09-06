@@ -3,14 +3,14 @@ package com.foss.app.models
 import com.google.gson.annotations.SerializedName
 
 data class UserDietSettings(
-    @SerializedName("user_id") val userId: Int = 1,
-    @SerializedName("height_cm") val heightCm: Double = 174.0,
-    @SerializedName("current_weight_kg") val currentWeightKg: Double = 70.0,
-    @SerializedName("target_weight_kg") val targetWeightKg: Double = 78.0,
-    @SerializedName("target_kcal") val targetKcal: Double = 2700.0,
-    @SerializedName("target_protein") val targetProtein: Double = 140.0,
-    @SerializedName("target_fat") val targetFat: Double = 75.0,
-    @SerializedName("target_carbs") val targetCarbs: Double = 350.0
+    @SerializedName("user_id") val userId: Int,
+    @SerializedName("height_cm") val heightCm: Double,
+    @SerializedName("current_weight_kg") val currentWeightKg: Double,
+    @SerializedName("target_weight_kg") val targetWeightKg: Double,
+    @SerializedName("target_kcal") val targetKcal: Double,
+    @SerializedName("target_protein") val targetProtein: Double,
+    @SerializedName("target_fat") val targetFat: Double,
+    @SerializedName("target_carbs") val targetCarbs: Double
 )
 
 data class DietProduct(
@@ -68,4 +68,19 @@ data class CreateProductRequest(
     @SerializedName("protein") val protein: Double? = null,
     @SerializedName("fat") val fat: Double? = null,
     @SerializedName("carbs") val carbs: Double? = null
+)
+
+data class CustomDietEntryRequest(
+    @SerializedName("user_id") val userId: Int = 1,
+    @SerializedName("name") val name: String,
+    @SerializedName("kcal") val kcal: Double,
+    @SerializedName("carbs") val carbs: Double,
+    @SerializedName("protein") val protein: Double,
+    @SerializedName("fat") val fat: Double,
+    @SerializedName("date") val date: String? = null
+)
+
+data class UpdateDietLogAmountRequest(
+    @SerializedName("log_id") val logId: Int,
+    @SerializedName("amount") val amount: Double
 )

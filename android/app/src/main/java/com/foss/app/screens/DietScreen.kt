@@ -62,6 +62,8 @@ fun DietScreen(
 
     var showFoodSheet by remember { mutableStateOf(false) }
     var showAddProductDialog by remember { mutableStateOf(false) }
+    var showCustomEntryDialog by remember { mutableStateOf(false) }
+    var editingLogEntry by remember { mutableStateOf<DietLogEntry?>(null) }
     var prefillProductName by remember { mutableStateOf("") }
 
     val dateDisplayTitle = remember(selectedDate) {
@@ -89,13 +91,13 @@ fun DietScreen(
                             .clickable(
                                 interactionSource = addSource,
                                 indication = null,
-                                onClick = { showFoodSheet = true }
+                                onClick = { showCustomEntryDialog = true }
                             ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Add,
-                            contentDescription = "Log Food",
+                            contentDescription = "Quick Custom Entry",
                             tint = AccentBlue
                         )
                     }
@@ -208,6 +210,9 @@ fun DietScreen(
                             items(summary.logs, key = { it.id }) { log ->
                                 DietLogCard(
                                     log = log,
+                                    onClick = {
+                                        editingLogEntry = log
+                                    },
                                     onDelete = {
                                         scope.launch {
                                             viewModel.deleteFoodLog(log.id, currentDateParam)
@@ -270,6 +275,31 @@ fun DietScreen(
                     viewModel.createProduct(req, currentDateParam)
                     showAddProductDialog = false
                     showFoodSheet = true
+                }
+            }
+        )
+    }
+
+    if (showCustomEntryDialog) {
+        CustomEntryDialog(
+            onDismiss = { showCustomEntryDialog = false },
+            onSave = { name, kcal, carbs, protein, fat ->
+                scope.launch {
+                    viewModel.logCustomEntry(name, kcal, carbs, protein, fat, currentDateParam)
+                    showCustomEntryDialog = false
+                }
+            }
+        )
+    }
+
+    editingLogEntry?.let { log ->
+        EditLogAmountDialog(
+            entry = log,
+            onDismiss = { editingLogEntry = null },
+            onSave = { newAmount ->
+                scope.launch {
+                    viewModel.updateLogAmount(log.id, newAmount, currentDateParam)
+                    editingLogEntry = null
                 }
             }
         )
@@ -389,8 +419,12 @@ private fun MacroRow(
 @Composable
 private fun DietLogCard(
     log: DietLogEntry,
+    onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val cardSource = remember { MutableInteractionSource() }
+    val isCardPressed by cardSource.collectIsPressedAsState()
+
     val deleteSource = remember { MutableInteractionSource() }
     val isDeletePressed by deleteSource.collectIsPressedAsState()
 
@@ -398,7 +432,14 @@ private fun DietLogCard(
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (isCardPressed) 0.4f else 1f)
+            .clickable(
+                interactionSource = cardSource,
+                indication = null,
+                onClick = onClick
+            )
     ) {
         Row(
             modifier = Modifier
@@ -451,6 +492,155 @@ private fun DietLogCard(
             }
         }
     }
+}
+
+@Composable
+private fun CustomEntryDialog(
+    onDismiss: () -> Unit,
+    onSave: (name: String, kcal: Double, carbs: Double, protein: Double, fat: Double) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var kcal by remember { mutableStateOf("") }
+    var carbs by remember { mutableStateOf("") }
+    var protein by remember { mutableStateOf("") }
+    var fat by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Custom Entry", color = MaterialTheme.colorScheme.onSurface) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Entry name *") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = kcal,
+                    onValueChange = { kcal = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("Calories (kcal) *") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = carbs,
+                        onValueChange = { carbs = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("Carbs") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = fat,
+                        onValueChange = { fat = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("Fat") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = protein,
+                        onValueChange = { protein = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("Protein") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        val k = kcal.toDoubleOrNull() ?: 0.0
+                        val c = carbs.toDoubleOrNull() ?: 0.0
+                        val p = protein.toDoubleOrNull() ?: 0.0
+                        val f = fat.toDoubleOrNull() ?: 0.0
+                        onSave(name.trim(), k, c, p, f)
+                    }
+                }
+            ) {
+                Text("Log", color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp)
+    )
+}
+
+@Composable
+private fun EditLogAmountDialog(
+    entry: DietLogEntry,
+    onDismiss: () -> Unit,
+    onSave: (Double) -> Unit
+) {
+    var amountText by remember { mutableStateOf(entry.amountG.toInt().toString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Entry Weight", color = MaterialTheme.colorScheme.onSurface) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = entry.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = AccentBlue
+                )
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("Weight (grams)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val newAmount = amountText.toDoubleOrNull()
+                    if (newAmount != null && newAmount > 0) {
+                        onSave(newAmount)
+                    }
+                }
+            ) {
+                Text("Save", color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp)
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -131,6 +131,12 @@ interface FossApi {
     @POST("/api/diet/log")
     suspend fun logDietFood(@Body request: LogDietRequest): Response<Unit>
 
+    @POST("/api/diet/log/custom")
+    suspend fun logCustomDietEntry(@Body request: CustomDietEntryRequest): Response<Unit>
+
+    @PATCH("/api/diet/log/amount")
+    suspend fun updateDietLogAmount(@Body request: UpdateDietLogAmountRequest): Response<Unit>
+
     @DELETE("/api/diet/log/delete")
     suspend fun deleteDietLog(@Query("id") logId: Int): Response<Unit>
 

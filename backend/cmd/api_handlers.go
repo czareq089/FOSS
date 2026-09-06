@@ -273,7 +273,22 @@ type LogDietReq struct {
 	UserID    int     `json:"user_id"`
 	ProductID int     `json:"product_id"`
 	AmountG   float64 `json:"amount"`
-	Date      string  `json:"date,omitempty"` // format: YYYY-MM-DD
+	Date      string  `json:"date,omitempty"`
+}
+
+type CustomDietEntryReq struct {
+	UserID  int     `json:"user_id"`
+	Name    string  `json:"name"`
+	Kcal    float64 `json:"kcal"`
+	Carbs   float64 `json:"carbs"`
+	Protein float64 `json:"protein"`
+	Fat     float64 `json:"fat"`
+	Date    string  `json:"date,omitempty"`
+}
+
+type UpdateDietLogAmountReq struct {
+	LogID   int     `json:"log_id"`
+	AmountG float64 `json:"amount"`
 }
 
 type DietLogItem struct {
@@ -2057,6 +2072,110 @@ func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
+}
+
+func handleAPICustomDietLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req CustomDietEntryReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid body", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "Name is required", http.StatusBadRequest)
+		return
+	}
+	if req.UserID == 0 {
+		req.UserID = 1
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	res, err := tx.Exec(`
+		INSERT INTO diet_products (name, brand, package_weight, serving_size, kcal, protein, fat, carbs)
+		VALUES (?, 'Custom', 100.0, 100.0, ?, ?, ?, ?)`,
+		strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs)
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, "Failed to insert custom product: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	newProdID, _ := res.LastInsertId()
+
+	if req.Date != "" && req.Date != "now" {
+		_, err = tx.Exec(`
+			INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
+			VALUES (?, ?, 100.0, datetime(?, '12:00:00'))`,
+			req.UserID, newProdID, req.Date)
+	} else {
+		_, err = tx.Exec(`
+			INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
+			VALUES (?, ?, 100.0, datetime('now'))`,
+			req.UserID, newProdID)
+	}
+
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, "Failed to log custom entry: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+func handleAPIUpdateDietLogAmount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req UpdateDietLogAmountReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid body", http.StatusBadRequest)
+		return
+	}
+
+	if req.LogID == 0 || req.AmountG <= 0 {
+		http.Error(w, "Invalid log_id or amount", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`UPDATE diet_logs SET amount = ? WHERE id = ?`, req.AmountG, req.LogID)
+	if err != nil {
+		http.Error(w, "Failed to update log: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleAPIDietLogDelete(w http.ResponseWriter, r *http.Request) {
