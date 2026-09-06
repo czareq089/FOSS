@@ -68,6 +68,9 @@ func main() {
 	http.HandleFunc("/api/diet/log", handleAPIDietLog)
 	http.HandleFunc("/api/diet/log/delete", handleAPIDietLogDelete)
 	http.HandleFunc("/api/diet/stats/consistency", handleGetDietConsistencyStats)
+	http.HandleFunc("/api/user/weight/history", handleAPIUserWeightHistory)
+	http.HandleFunc("/api/user/daily-metrics/today", handleAPIGetDailyMetricsToday)
+	http.HandleFunc("/api/user/daily-metrics/steps", handleAPIUpdateDailySteps)
 
 	// Uruchomienie serwera
 	port := ":8080"

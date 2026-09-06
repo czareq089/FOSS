@@ -206,6 +206,23 @@ type UserAlgorithmSettings struct {
 	DropPercentage    float64 `json:"drop_percentage"`
 	BackoffEnabled    bool    `json:"backoff_enabled"`
 	BackoffPercentage float64 `json:"backoff_percentage"`
+	ShowRIR           bool    `json:"show_rir"`
+}
+
+type WeightHistoryPoint struct {
+	Date     string  `json:"date"`
+	WeightKg float64 `json:"weight_kg"`
+}
+
+type DailyMetricsTodayResp struct {
+	Date       string   `json:"date"`
+	StepsCount int      `json:"steps_count"`
+	WeightKg   *float64 `json:"weight_kg"`
+}
+
+type UpdateStepsReq struct {
+	UserID     int `json:"user_id"`
+	StepsCount int `json:"steps_count"`
 }
 
 type ConsistencyStatsResponse struct {
@@ -1487,6 +1504,8 @@ func handleAPIUserAlgorithms(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
+	_, _ = db.Exec(`ALTER TABLE user_algorithm_settings ADD COLUMN show_rir INTEGER NOT NULL DEFAULT 1`)
+
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
 		userID = "1"
@@ -1501,16 +1520,19 @@ func handleAPIUserAlgorithms(w http.ResponseWriter, r *http.Request) {
 		s.DropPercentage = 20.0
 		s.BackoffEnabled = true
 		s.BackoffPercentage = 10.0
+		s.ShowRIR = true
 
+		var showRirInt int
 		err := db.QueryRow(`
-			SELECT warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage 
+			SELECT warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage, COALESCE(show_rir, 1)
 			FROM user_algorithm_settings WHERE user_id = ?`, userID).
-			Scan(&s.WarmupEnabled, &s.WarmupBase, &s.DropEnabled, &s.DropPercentage, &s.BackoffEnabled, &s.BackoffPercentage)
+			Scan(&s.WarmupEnabled, &s.WarmupBase, &s.DropEnabled, &s.DropPercentage, &s.BackoffEnabled, &s.BackoffPercentage, &showRirInt)
 
 		if err != nil && err != sql.ErrNoRows {
 			http.Error(w, "Database query error", http.StatusInternalServerError)
 			return
 		}
+		s.ShowRIR = (showRirInt == 1)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s)
@@ -1523,21 +1545,30 @@ func handleAPIUserAlgorithms(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid body", http.StatusBadRequest)
 			return
 		}
+		if s.UserID == 0 {
+			s.UserID = 1
+		}
+
+		showRirInt := 0
+		if s.ShowRIR {
+			showRirInt = 1
+		}
 
 		_, err := db.Exec(`
-			INSERT INTO user_algorithm_settings (user_id, warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO user_algorithm_settings (user_id, warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage, show_rir)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(user_id) DO UPDATE SET
 				warmup_enabled = excluded.warmup_enabled,
 				warmup_base = excluded.warmup_base,
 				drop_enabled = excluded.drop_enabled,
 				drop_percentage = excluded.drop_percentage,
 				backoff_enabled = excluded.backoff_enabled,
-				backoff_percentage = excluded.backoff_percentage`,
-			s.UserID, s.WarmupEnabled, s.WarmupBase, s.DropEnabled, s.DropPercentage, s.BackoffEnabled, s.BackoffPercentage)
+				backoff_percentage = excluded.backoff_percentage,
+				show_rir = excluded.show_rir`,
+			s.UserID, s.WarmupEnabled, s.WarmupBase, s.DropEnabled, s.DropPercentage, s.BackoffEnabled, s.BackoffPercentage, showRirInt)
 
 		if err != nil {
-			http.Error(w, "Database save error", http.StatusInternalServerError)
+			http.Error(w, "Database save error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -1585,6 +1616,123 @@ func handleGetConsistencyStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ConsistencyStatsResponse{
 		WorkoutDates: dates,
 	})
+}
+
+func handleAPIUserWeightHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`
+		SELECT date, weight_kg 
+		FROM user_daily_metrics 
+		WHERE user_id = ? AND weight_kg IS NOT NULL AND weight_kg > 0 
+		ORDER BY date ASC`, userID)
+	if err != nil {
+		http.Error(w, "Query error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	history := []WeightHistoryPoint{}
+	for rows.Next() {
+		var pt WeightHistoryPoint
+		if err := rows.Scan(&pt.Date, &pt.WeightKg); err == nil {
+			history = append(history, pt)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(history)
+}
+
+func handleAPIGetDailyMetricsToday(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var resp DailyMetricsTodayResp
+	resp.Date = ""
+	resp.StepsCount = 0
+
+	err = db.QueryRow(`
+		SELECT date, steps_count, weight_kg 
+		FROM user_daily_metrics 
+		WHERE user_id = ? AND date = date('now')`, userID).
+		Scan(&resp.Date, &resp.StepsCount, &resp.WeightKg)
+
+	if err == sql.ErrNoRows {
+		// Dziś jeszcze brak wpisu – zwracamy 0 kroków
+		_ = db.QueryRow(`SELECT date('now')`).Scan(&resp.Date)
+	} else if err != nil {
+		http.Error(w, "Query error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func handleAPIUpdateDailySteps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req UpdateStepsReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.UserID == 0 {
+		req.UserID = 1
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+		INSERT INTO user_daily_metrics (user_id, date, steps_count)
+		VALUES (?, date('now'), ?)
+		ON CONFLICT(user_id, date) DO UPDATE SET steps_count = excluded.steps_count`,
+		req.UserID, req.StepsCount)
+
+	if err != nil {
+		http.Error(w, "Database save error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // -------------------------------------------------------------
