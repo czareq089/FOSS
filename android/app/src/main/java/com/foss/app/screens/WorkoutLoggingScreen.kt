@@ -425,6 +425,8 @@ fun WorkoutLoggingScreen(
                             val warmupTemplates = templateSets.filter { it.setType == "warmup" }
                             val totalWarmups = warmupTemplates.size
 
+                            val cachedDrafts = viewModel.activeWorkoutInputs[exercise.workoutExerciseId] ?: emptyMap()
+
                             for (i in 1..totalCount) {
                                 val template = templateSets.find { it.setNumber == i }
                                 val prevSet = exercise.lastSets?.find { it.setNumber == i }
@@ -461,8 +463,11 @@ fun WorkoutLoggingScreen(
                                     }
                                 }
 
+                                val draft = cachedDrafts[i]
+
                                 initialList.add(SetRowState(i).apply {
-                                    this.setType = currentType
+                                    this.setType = draft?.setType ?: currentType
+                                    // Ustawiamy wyłącznie fallbacki jako podpowiedź (hint)
                                     if (calcWeight > 0.0) {
                                         this.fallbackWeight = if (calcWeight % 1.0 == 0.0) calcWeight.toInt().toString() else calcWeight.toString()
                                     }
@@ -471,6 +476,21 @@ fun WorkoutLoggingScreen(
                                     }
                                     if (calcRir >= 0 && (prevSet != null || currentType != "standard")) {
                                         this.fallbackRir = calcRir.toString()
+                                    }
+
+                                    // Przywracamy szkic użytkownika jeśli istniał, w przeciwnym wypadku pole jest puste
+                                    if (draft != null) {
+                                        this.weight = draft.weight
+                                        this.reps = draft.reps
+                                        this.rir = draft.rir
+                                        this.confirmed = draft.confirmed
+                                        this.autoFilled = false
+                                    } else {
+                                        this.weight = ""
+                                        this.reps = ""
+                                        this.rir = ""
+                                        this.confirmed = false
+                                        this.autoFilled = true
                                     }
                                 })
                             }
@@ -536,6 +556,7 @@ fun WorkoutLoggingScreen(
                                                                         val moved = exercises.removeAt(from)
                                                                         val safeInsert = to.coerceIn(0, exercises.size)
                                                                         exercises.add(safeInsert, moved)
+                                                                        hasStructureChanged = true
                                                                     }
                                                                     draggedIndex = null
                                                                     targetIndex = null
@@ -631,7 +652,8 @@ fun WorkoutLoggingScreen(
                                             onStartTimer = { seconds -> timerTotal = seconds; timerRemaining = seconds; isTimerRunning = true },
                                             onCancelTimer = { timerTotal = 0; timerRemaining = 0; isTimerRunning = false },
                                             onOpenSetType = { row -> activeSetRowForType = row },
-                                            onPrAchieved = { msg -> prBannerText = msg }
+                                            onPrAchieved = { msg -> prBannerText = msg },
+                                            onStructureChanged = { hasStructureChanged = true }
                                         )
                                     }
                                 }
@@ -771,6 +793,8 @@ fun WorkoutLoggingScreen(
                         if (ex != null) {
                             exercises.removeAll { it.workoutExerciseId == ex.workoutExerciseId }
                             exerciseSetsMap.remove(ex.workoutExerciseId)
+                            viewModel.activeWorkoutInputs.remove(ex.workoutExerciseId)
+                            hasStructureChanged = true
                         }
                         exerciseToDelete = null
                     }
@@ -792,6 +816,7 @@ fun WorkoutLoggingScreen(
             Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
                 val updateType = { type: String ->
                     row.setType = type
+                    hasStructureChanged = true
                     activeSetRowForType = null
                 }
                 SetTypeOption("standard", "Standard set", null, Color.White) { updateType("standard") }
@@ -855,7 +880,7 @@ fun WorkoutLoggingScreen(
         AlertDialog(
             onDismissRequest = { showSyncDialog = false; onFinish() },
             title = { Text("Update original routine?", color = MaterialTheme.colorScheme.onSurface) },
-            text = { Text("You changed the exercises or their order. Do you want to update the original routine template for the future?", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            text = { Text("You changed the exercises or sets. Do you want to update the original routine template for the future?", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1109,9 +1134,22 @@ private fun ExerciseLogContent(
     onStartTimer: (Int) -> Unit,
     onCancelTimer: () -> Unit,
     onOpenSetType: (SetRowState) -> Unit,
-    onPrAchieved: (String) -> Unit
+    onPrAchieved: (String) -> Unit,
+    onStructureChanged: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+
+    fun syncSetDraft(row: SetRowState) {
+        viewModel.updateSetDraft(
+            workoutExerciseId = exercise.workoutExerciseId,
+            setNumber = row.setNumber,
+            weight = row.weight,
+            reps = row.reps,
+            rir = row.rir,
+            confirmed = row.confirmed,
+            setType = row.setType
+        )
+    }
 
     fun propagateFromFirstRow() {
         val first = sets.firstOrNull() ?: return
@@ -1120,6 +1158,7 @@ private fun ExerciseLogContent(
                 row.weight = first.weight
                 row.reps = first.reps
                 row.rir = first.rir
+                syncSetDraft(row)
             }
         }
     }
@@ -1127,6 +1166,7 @@ private fun ExerciseLogContent(
     fun renumberSets() {
         sets.forEachIndexed { i, s ->
             s.setNumber = i + 1
+            syncSetDraft(s)
         }
     }
 
@@ -1240,11 +1280,19 @@ private fun ExerciseLogContent(
                         value = row.weight,
                         onValueChange = {
                             row.weight = it.filter { c -> c.isDigit() || c == '.' }
+                            syncSetDraft(row)
                             if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
                         },
                         enabled = !row.confirmed && !row.submitting,
                         singleLine = true,
-                        placeholder = { if (row.fallbackWeight.isNotEmpty()) Text(row.fallbackWeight, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                        placeholder = {
+                            if (row.fallbackWeight.isNotEmpty()) {
+                                Text(
+                                    text = row.fallbackWeight,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                )
+                            }
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1261,11 +1309,19 @@ private fun ExerciseLogContent(
                         value = row.reps,
                         onValueChange = {
                             row.reps = it.filter(Char::isDigit)
+                            syncSetDraft(row)
                             if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
                         },
                         enabled = !row.confirmed && !row.submitting,
                         singleLine = true,
-                        placeholder = { if (row.fallbackReps.isNotEmpty()) Text(row.fallbackReps, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                        placeholder = {
+                            if (row.fallbackReps.isNotEmpty()) {
+                                Text(
+                                    text = row.fallbackReps,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                )
+                            }
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1283,11 +1339,19 @@ private fun ExerciseLogContent(
                             value = row.rir,
                             onValueChange = {
                                 row.rir = it.filter(Char::isDigit)
+                                syncSetDraft(row)
                                 if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
                             },
                             enabled = !row.confirmed && !row.submitting,
                             singleLine = true,
-                            placeholder = { if (row.fallbackRir.isNotEmpty()) Text(row.fallbackRir, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                            placeholder = {
+                                if (row.fallbackRir.isNotEmpty()) {
+                                    Text(
+                                        text = row.fallbackRir,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                    )
+                                }
+                            },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -1321,9 +1385,14 @@ private fun ExerciseLogContent(
                                         indication = null
                                     ) {
                                         if (!row.confirmed) {
-                                            if (row.weight.isEmpty() && row.fallbackWeight.isNotEmpty()) row.weight = row.fallbackWeight
-                                            if (row.reps.isEmpty() && row.fallbackReps.isNotEmpty()) row.reps = row.fallbackReps
-                                            if (row.rir.isEmpty() && row.fallbackRir.isNotEmpty()) row.rir = row.fallbackRir
+                                            // Przepisanie z fallbacku tylko w momencie wysyłki jeśli user nic nie wpisał
+                                            val finalWeightStr = if (row.weight.isNotEmpty()) row.weight else row.fallbackWeight
+                                            val finalRepsStr = if (row.reps.isNotEmpty()) row.reps else row.fallbackReps
+                                            val finalRirStr = if (row.rir.isNotEmpty()) row.rir else row.fallbackRir
+
+                                            row.weight = finalWeightStr
+                                            row.reps = finalRepsStr
+                                            row.rir = finalRirStr
 
                                             val reps = row.reps.toIntOrNull() ?: 0
                                             val weight = row.weight.toDoubleOrNull() ?: 0.0
@@ -1345,13 +1414,14 @@ private fun ExerciseLogContent(
 
                                             if (isNewPr && weight > 0.0 && reps > 0) {
                                                 row.isPr = true
-                                                val weightStr = if (weight % 1.0 == 0.0) weight.toInt().toString() else weight.toString()
-                                                onPrAchieved("${exercise.name}: $weightStr kg × $reps")
+                                                val weightFormatted = if (weight % 1.0 == 0.0) weight.toInt().toString() else weight.toString()
+                                                onPrAchieved("${exercise.name}: $weightFormatted kg × $reps")
                                             }
 
                                             row.error = null
                                             row.confirmed = true
                                             row.submitting = true
+                                            syncSetDraft(row)
 
                                             val nextIndex = rowIndex + 1
                                             val isNextSetDrop = if (nextIndex < sets.size) {
@@ -1372,11 +1442,13 @@ private fun ExerciseLogContent(
                                                     row.confirmed = false
                                                     row.isPr = false
                                                     row.error = "Failed"
+                                                    syncSetDraft(row)
                                                 }
                                             }
                                         } else {
                                             row.confirmed = false
                                             row.isPr = false
+                                            syncSetDraft(row)
                                         }
                                     }
                             ) {
@@ -1407,6 +1479,7 @@ private fun ExerciseLogContent(
                                         ) {
                                             sets.remove(row)
                                             renumberSets()
+                                            onStructureChanged()
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1420,7 +1493,11 @@ private fun ExerciseLogContent(
         }
         TextButton(
             onClick = {
-                sets.add(SetRowState((sets.maxOfOrNull { it.setNumber } ?: 0) + 1))
+                val nextSetNum = (sets.maxOfOrNull { it.setNumber } ?: 0) + 1
+                val newRow = SetRowState(nextSetNum)
+                sets.add(newRow)
+                syncSetDraft(newRow)
+                onStructureChanged()
             },
             modifier = Modifier.align(Alignment.End)
         ) { Text("+ Add set", color = MaterialTheme.colorScheme.primary) }

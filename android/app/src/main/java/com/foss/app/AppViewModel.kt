@@ -1,5 +1,6 @@
 package com.foss.app
 
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -26,6 +27,22 @@ class AppViewModel : ViewModel() {
 
     var workoutState = mutableStateOf<UiState<Triple<Int, Int, List<ExerciseInfo>>>>(UiState.Idle)
         private set
+
+    // Pamięć podręczna wprowadzonych danych serii w aktywnym treningu: workoutExerciseId -> (setNumber -> (weight, reps, rir, confirmed))
+    val activeWorkoutInputs = mutableStateMapOf<Int, MutableMap<Int, ActiveSetDraft>>()
+
+    data class ActiveSetDraft(
+        var weight: String = "",
+        var reps: String = "",
+        var rir: String = "",
+        var confirmed: Boolean = false,
+        var setType: String = "standard"
+    )
+
+    fun updateSetDraft(workoutExerciseId: Int, setNumber: Int, weight: String, reps: String, rir: String, confirmed: Boolean, setType: String) {
+        val exerciseMap = activeWorkoutInputs.getOrPut(workoutExerciseId) { mutableMapOf() }
+        exerciseMap[setNumber] = ActiveSetDraft(weight, reps, rir, confirmed, setType)
+    }
 
     var workoutHistoryState = mutableStateOf<UiState<List<WorkoutSummary>>>(UiState.Idle)
         private set
@@ -91,6 +108,7 @@ class AppViewModel : ViewModel() {
 
     suspend fun startWorkout(routineId: Int): Int? {
         workoutState.value = UiState.Loading
+        activeWorkoutInputs.clear()
         return try {
             val response = api.startWorkout(StartWorkoutRequest(routineId, currentUserId))
             val body = response.body()
@@ -129,6 +147,22 @@ class AppViewModel : ViewModel() {
                             }
                         )
                     }
+
+                    // Przywracanie zapisanych już w bazie serii do pamięci podręcznej szkiców
+                    body.exercises.forEach { we ->
+                        val exMap = activeWorkoutInputs.getOrPut(we.workoutExerciseId) { mutableMapOf() }
+                        we.sets.forEach { s ->
+                            val wStr = if (s.weightKg % 1.0 == 0.0) s.weightKg.toInt().toString() else s.weightKg.toString()
+                            exMap[s.setNumber] = ActiveSetDraft(
+                                weight = wStr,
+                                reps = s.reps.toString(),
+                                rir = s.rir.toString(),
+                                confirmed = true,
+                                setType = "standard"
+                            )
+                        }
+                    }
+
                     workoutState.value = UiState.Success(Triple(body.workoutId, 0, mappedExercises))
                 } else {
                     workoutState.value = UiState.Error("Failed to restore workout")
@@ -141,6 +175,7 @@ class AppViewModel : ViewModel() {
 
     fun resetWorkoutState() {
         workoutState.value = UiState.Idle
+        activeWorkoutInputs.clear()
     }
 
     fun currentWorkoutId(): Int? = (workoutState.value as? UiState.Success)?.data?.first
@@ -155,9 +190,14 @@ class AppViewModel : ViewModel() {
 
     suspend fun logSet(workoutExerciseId: Int, setNumber: Int, reps: Int, weightKg: Double, rir: Int, setType: String): Boolean {
         return try {
-            api.logSet(
+            val ok = api.logSet(
                 SetLogRequest(workoutExerciseId, setNumber, reps, weightKg, rir, setType)
             ).isSuccessful
+            if (ok) {
+                val wStr = if (weightKg % 1.0 == 0.0) weightKg.toInt().toString() else weightKg.toString()
+                updateSetDraft(workoutExerciseId, setNumber, wStr, reps.toString(), rir.toString(), true, setType)
+            }
+            ok
         } catch (e: Exception) {
             false
         }
