@@ -2,6 +2,7 @@ package com.foss.app
 
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.foss.app.models.*
@@ -14,6 +15,14 @@ sealed class UiState<out T> {
     data class Success<T>(val data: T) : UiState<T>()
     data class Error(val message: String) : UiState<Nothing>()
 }
+
+data class ActiveSetDraft(
+    var weight: String = "",
+    var reps: String = "",
+    var rir: String = "",
+    var confirmed: Boolean = false,
+    var setType: String = "standard"
+)
 
 class AppViewModel : ViewModel() {
 
@@ -28,20 +37,26 @@ class AppViewModel : ViewModel() {
     var workoutState = mutableStateOf<UiState<Triple<Int, Int, List<ExerciseInfo>>>>(UiState.Idle)
         private set
 
-    // Pamięć podręczna wprowadzonych danych serii w aktywnym treningu: workoutExerciseId -> (setNumber -> (weight, reps, rir, confirmed))
-    val activeWorkoutInputs = mutableStateMapOf<Int, MutableMap<Int, ActiveSetDraft>>()
+    // Pamięć podręczna wpisów w aktywnym treningu: workoutExerciseId -> (setNumber -> ActiveSetDraft)
+    val activeWorkoutInputs: SnapshotStateMap<Int, MutableMap<Int, ActiveSetDraft>> = mutableStateMapOf()
 
-    data class ActiveSetDraft(
-        var weight: String = "",
-        var reps: String = "",
-        var rir: String = "",
-        var confirmed: Boolean = false,
-        var setType: String = "standard"
-    )
-
-    fun updateSetDraft(workoutExerciseId: Int, setNumber: Int, weight: String, reps: String, rir: String, confirmed: Boolean, setType: String) {
+    fun updateSetDraft(
+        workoutExerciseId: Int,
+        setNumber: Int,
+        weight: String,
+        reps: String,
+        rir: String,
+        confirmed: Boolean,
+        setType: String
+    ) {
         val exerciseMap = activeWorkoutInputs.getOrPut(workoutExerciseId) { mutableMapOf() }
-        exerciseMap[setNumber] = ActiveSetDraft(weight, reps, rir, confirmed, setType)
+        exerciseMap[setNumber] = ActiveSetDraft(
+            weight = weight,
+            reps = reps,
+            rir = rir,
+            confirmed = confirmed,
+            setType = setType
+        )
     }
 
     var workoutHistoryState = mutableStateOf<UiState<List<WorkoutSummary>>>(UiState.Idle)
@@ -70,6 +85,9 @@ class AppViewModel : ViewModel() {
     var dietSummaryState = mutableStateOf<UiState<DailyDietSummary>>(UiState.Idle)
         private set
     var dietProductsState = mutableStateOf<UiState<List<DietProduct>>>(UiState.Idle)
+        private set
+
+    var dietAdaptationState = mutableStateOf<UiState<DietAdaptationReport>>(UiState.Idle)
         private set
 
     var weightHistoryState = mutableStateOf<UiState<List<WeightHistoryPoint>>>(UiState.Idle)
@@ -148,7 +166,6 @@ class AppViewModel : ViewModel() {
                         )
                     }
 
-                    // Przywracanie zapisanych już w bazie serii do pamięci podręcznej szkiców
                     body.exercises.forEach { we ->
                         val exMap = activeWorkoutInputs.getOrPut(we.workoutExerciseId) { mutableMapOf() }
                         we.sets.forEach { s ->
@@ -522,16 +539,6 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    suspend fun saveDailySteps(steps: Int): Boolean {
-        return try {
-            val ok = api.updateDailySteps(UpdateStepsReq(currentUserId, steps)).isSuccessful
-            if (ok) loadDailyMetricsToday()
-            ok
-        } catch (e: Exception) {
-            false
-        }
-    }
-
     fun loadConsistencyStats() {
         viewModelScope.launch {
             try {
@@ -570,6 +577,20 @@ class AppViewModel : ViewModel() {
                 } else UiState.Error("Failed to load products")
             } catch (e: Exception) {
                 dietSummaryState.value = UiState.Error(e.message ?: "Connection error")
+            }
+        }
+    }
+
+    fun loadDietAdaptation() {
+        viewModelScope.launch {
+            dietAdaptationState.value = UiState.Loading
+            try {
+                val res = api.getDietAdaptation(currentUserId)
+                dietAdaptationState.value = if (res.isSuccessful && res.body() != null) {
+                    UiState.Success(res.body()!!)
+                } else UiState.Error("Failed to load adaptation report")
+            } catch (e: Exception) {
+                dietAdaptationState.value = UiState.Error(e.message ?: "Connection error")
             }
         }
     }

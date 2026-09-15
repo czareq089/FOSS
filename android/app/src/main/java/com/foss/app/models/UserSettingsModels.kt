@@ -30,13 +30,7 @@ data class WeightHistoryPoint(
 
 data class DailyMetricsToday(
     @SerializedName("date") val date: String,
-    @SerializedName("steps_count") val stepsCount: Int,
     @SerializedName("weight_kg") val weightKg: Double?
-)
-
-data class UpdateStepsReq(
-    @SerializedName("user_id") val userId: Int = 1,
-    @SerializedName("steps_count") val stepsCount: Int
 )
 
 data class PlateBreakdown(

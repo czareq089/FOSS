@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -215,14 +217,8 @@ type WeightHistoryPoint struct {
 }
 
 type DailyMetricsTodayResp struct {
-	Date       string   `json:"date"`
-	StepsCount int      `json:"steps_count"`
-	WeightKg   *float64 `json:"weight_kg"`
-}
-
-type UpdateStepsReq struct {
-	UserID     int `json:"user_id"`
-	StepsCount int `json:"steps_count"`
+	Date     string   `json:"date"`
+	WeightKg *float64 `json:"weight_kg"`
 }
 
 type ConsistencyStatsResponse struct {
@@ -238,6 +234,7 @@ type UserDietSettingsModel struct {
 	HeightCm        float64 `json:"height_cm"`
 	CurrentWeightKg float64 `json:"current_weight_kg"`
 	TargetWeightKg  float64 `json:"target_weight_kg"`
+	Goal            string  `json:"goal"`
 	TargetKcal      float64 `json:"target_kcal"`
 	TargetProtein   float64 `json:"target_protein"`
 	TargetFat       float64 `json:"target_fat"`
@@ -314,6 +311,143 @@ type DailyDietSummaryResp struct {
 	TargetF      float64       `json:"target_f"`
 	TargetC      float64       `json:"target_c"`
 	Logs         []DietLogItem `json:"logs"`
+}
+
+type DietAdaptationReport struct {
+	CurrentWeight      float64 `json:"current_weight"`
+	WeeklyChangeKg     float64 `json:"weekly_change_kg"`
+	AverageKcal7Days   float64 `json:"average_kcal_7d"`
+	Recommendation     string  `json:"recommendation"`
+	DeltaKcalSuggested float64 `json:"delta_kcal_suggested"`
+}
+
+// ==========================================
+// SILNIK ALGORYTMÓW METABOLICZNYCH
+// ==========================================
+
+func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, protein, fat, carbs float64, currentWeight float64, height float64, goal string, targetWeight float64) {
+	height = 174.0
+	targetWeight = 78.0
+	goal = "bulk"
+	surplusKcal := 500.0
+	deficitKcal := 400.0
+	workoutBonusKcal := 350.0
+
+	_ = db.QueryRow(`
+       SELECT height_cm, target_weight_kg, COALESCE(goal, 'bulk'), surplus_kcal, deficit_kcal, workout_bonus_kcal
+       FROM user_diet_settings WHERE user_id = ?`, userID).
+		Scan(&height, &targetWeight, &goal, &surplusKcal, &deficitKcal, &workoutBonusKcal)
+
+	// Ostatnia znana waga użytkownika
+	_ = db.QueryRow(`
+       SELECT weight_kg FROM user_daily_metrics 
+       WHERE user_id = ? AND weight_kg > 0 
+       ORDER BY date DESC, id DESC LIMIT 1`, userID).Scan(&currentWeight)
+
+	if currentWeight <= 0 {
+		currentWeight = 70.0
+	}
+
+	// Wiek użytkownika z daty urodzenia
+	age := 24.0
+	var birthday sql.NullString
+	_ = db.QueryRow(`SELECT birthday_date FROM users WHERE id = ?`, userID).Scan(&birthday)
+	if birthday.Valid && len(birthday.String) >= 4 {
+		var birthYear int
+		if _, err := fmt.Sscanf(birthday.String[:4], "%d", &birthYear); err == nil && birthYear > 1900 {
+			age = float64(time.Now().Year() - birthYear)
+		}
+	}
+
+	// Wzór Mifflina-St Jeora (BMR)
+	bmr := (10.0 * currentWeight) + (6.25 * height) - (5.0 * age) + 5.0
+
+	// Bazowe utrzymanie: sedentary (BMR * 1.2) + stały NEAT z 5000 kroków (~200 kcal)
+	sedentaryBase := (bmr * 1.2) + 200.0
+
+	// Czy odbył się trening danego dnia
+	targetDateQuery := dateStr
+	if targetDateQuery == "now" {
+		targetDateQuery = time.Now().Format("2006-01-02")
+	}
+
+	var hadWorkout int
+	_ = db.QueryRow(`
+       SELECT COUNT(id) FROM training_workouts 
+       WHERE user_id = ? AND date(date) = date(?)`, userID, targetDateQuery).Scan(&hadWorkout)
+
+	eat := 0.0
+	if hadWorkout > 0 {
+		eat = workoutBonusKcal
+	}
+
+	// Feedback loop: adaptacja do tempa zmian wagi (średnia 7d vs 14d)
+	var avgWeight7d, avgWeight14d sql.NullFloat64
+	_ = db.QueryRow(`
+       SELECT AVG(weight_kg) FROM user_daily_metrics 
+       WHERE user_id = ? AND date >= date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgWeight7d)
+	_ = db.QueryRow(`
+       SELECT AVG(weight_kg) FROM user_daily_metrics 
+       WHERE user_id = ? AND date >= date('now', '-14 days') AND date < date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgWeight14d)
+
+	feedbackKcalAdjustment := 0.0
+	if avgWeight7d.Valid && avgWeight14d.Valid && avgWeight14d.Float64 > 0 {
+		deltaW := avgWeight7d.Float64 - avgWeight14d.Float64 // tempo kg na tydzień
+		if goal == "bulk" {
+			if deltaW < 0.25 {
+				feedbackKcalAdjustment = 150.0 // waga rośnie za wolno na semi dirty bulk -> podbijamy
+			} else if deltaW > 0.80 {
+				feedbackKcalAdjustment = -150.0 // za szybkie zalewanie -> korygujemy w dół
+			}
+		} else if goal == "cut" {
+			if deltaW > -0.15 {
+				feedbackKcalAdjustment = -150.0 // zastój na redukcji
+			} else if deltaW < -0.80 {
+				feedbackKcalAdjustment = 100.0 // za ostry spadek wagi
+			}
+		}
+	}
+
+	tdeeBase := sedentaryBase + eat + feedbackKcalAdjustment
+
+	var pPerKg, fPerKg float64
+	switch strings.ToLower(goal) {
+	case "bulk":
+		// Semi Dirty Bulk: maksymalizacja siły i szybki przyrost masy, wyższy pułap tłuszczu pod gęste kalorie
+		kcal = tdeeBase + surplusKcal
+		pPerKg = 1.9
+		fPerKg = 1.4
+	case "cut":
+		kcal = math.Max(1400.0, tdeeBase-deficitKcal)
+		pPerKg = 2.3
+		fPerKg = 0.8
+	case "recomp":
+		if hadWorkout > 0 {
+			kcal = tdeeBase + 200.0
+		} else {
+			kcal = math.Max(1500.0, tdeeBase-200.0)
+		}
+		pPerKg = 2.2
+		fPerKg = 0.9
+	case "maintain":
+		fallthrough
+	default:
+		kcal = tdeeBase
+		pPerKg = 1.8
+		fPerKg = 1.0
+	}
+
+	protein = pPerKg * currentWeight
+	fat = fPerKg * currentWeight
+
+	remainingCalories := kcal - (protein*4.0 + fat*9.0)
+	if remainingCalories > 0 {
+		carbs = remainingCalories / 4.0
+	} else {
+		carbs = 0.0
+	}
+
+	return kcal, protein, fat, carbs, currentWeight, height, goal, targetWeight
 }
 
 // ==========================================
@@ -423,11 +557,11 @@ func handleAPILogSet(w http.ResponseWriter, r *http.Request) {
 
 	if exists {
 		_, err = db.Exec(`UPDATE training_workout_sets SET reps = ?, weight_kg = ?, rir = ?, set_type = ? 
-							WHERE workout_exercise_id = ? AND set_number = ?`,
+                      WHERE workout_exercise_id = ? AND set_number = ?`,
 			req.Reps, req.WeightKg, req.RIR, req.SetType, req.WorkoutExerciseID, req.SetNumber)
 	} else {
 		_, err = db.Exec(`INSERT INTO training_workout_sets (workout_exercise_id, set_number, reps, weight_kg, rir, set_type) 
-							VALUES (?, ?, ?, ?, ?, ?)`,
+                      VALUES (?, ?, ?, ?, ?, ?)`,
 			req.WorkoutExerciseID, req.SetNumber, req.Reps, req.WeightKg, req.RIR, req.SetType)
 	}
 
@@ -465,11 +599,11 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.Query(`
-		SELECT re.id, re.exercise_id, e.name, re.position
-		FROM training_routine_exercises re
-		JOIN training_exercises e ON e.id = re.exercise_id
-		WHERE re.routine_id = ?
-		ORDER BY re.position`, routineID)
+       SELECT re.id, re.exercise_id, e.name, re.position
+       FROM training_routine_exercises re
+       JOIN training_exercises e ON e.id = re.exercise_id
+       WHERE re.routine_id = ?
+       ORDER BY re.position`, routineID)
 	if err != nil {
 		http.Error(w, "Failed to fetch routine exercises", http.StatusInternalServerError)
 		return
@@ -499,13 +633,13 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 	for i := range exercises {
 		var lastWorkoutExerciseID int
 		err := db.QueryRow(`
-			SELECT we.id 
-			FROM training_workout_exercises we 
-			JOIN training_workouts w ON w.id = we.workout_id 
-			JOIN training_workout_sets s ON s.workout_exercise_id = we.id
-			WHERE w.user_id = ? AND we.exercise_id = ?
-			GROUP BY we.id
-			ORDER BY w.date DESC, w.id DESC LIMIT 1`, userID, exercises[i].ExerciseID).Scan(&lastWorkoutExerciseID)
+          SELECT we.id 
+          FROM training_workout_exercises we 
+          JOIN training_workouts w ON w.id = we.workout_id 
+          JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+          WHERE w.user_id = ? AND we.exercise_id = ?
+          GROUP BY we.id
+          ORDER BY w.date DESC, w.id DESC LIMIT 1`, userID, exercises[i].ExerciseID).Scan(&lastWorkoutExerciseID)
 		if err == nil {
 			setRows, errSet := db.Query(`SELECT set_number, weight_kg, reps, rir FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, lastWorkoutExerciseID)
 			if errSet == nil {
@@ -561,11 +695,11 @@ func handleAPIMobileDashboardVolume(w http.ResponseWriter, r *http.Request) {
 	var query string
 	var args []interface{}
 	baseQuery := `
-		SELECT COALESCE(SUM(s.weight_kg * s.reps), 0)
-		FROM training_workout_sets s
-		JOIN training_workout_exercises we ON s.workout_exercise_id = we.id
-		JOIN training_workouts w ON we.workout_id = w.id
-		WHERE w.user_id = ?`
+       SELECT COALESCE(SUM(s.weight_kg * s.reps), 0)
+       FROM training_workout_sets s
+       JOIN training_workout_exercises we ON s.workout_exercise_id = we.id
+       JOIN training_workouts w ON we.workout_id = w.id
+       WHERE w.user_id = ?`
 
 	if interval == "" {
 		query = baseQuery
@@ -600,11 +734,11 @@ func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
 			userID = "1"
 		}
 		rows, err := db.Query(`
-			SELECT w.id, w.date, COALESCE(r.name, 'Custom workout')
-			FROM training_workouts w
-			LEFT JOIN training_routines r ON r.id = w.routine_id
-			WHERE w.user_id = ?
-			ORDER BY w.date DESC`, userID)
+          SELECT w.id, w.date, COALESCE(r.name, 'Custom workout')
+          FROM training_workouts w
+          LEFT JOIN training_routines r ON r.id = w.routine_id
+          WHERE w.user_id = ?
+          ORDER BY w.date DESC`, userID)
 		if err != nil {
 			http.Error(w, "Failed to fetch workouts", http.StatusInternalServerError)
 			return
@@ -637,10 +771,10 @@ func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if _, err := tx.Exec(`
-			DELETE FROM training_workout_sets
-			WHERE workout_exercise_id IN (
-				SELECT id FROM training_workout_exercises WHERE workout_id = ?
-			)`, workoutID); err != nil {
+          DELETE FROM training_workout_sets
+          WHERE workout_exercise_id IN (
+             SELECT id FROM training_workout_exercises WHERE workout_id = ?
+          )`, workoutID); err != nil {
 			tx.Rollback()
 			http.Error(w, "Failed to delete sets", http.StatusInternalServerError)
 			return
@@ -692,9 +826,9 @@ func handleAPIReorderExercises(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, p := range req.Positions {
 		if _, err := tx.Exec(`
-			UPDATE training_routine_exercises
-			SET position = ?
-			WHERE routine_id = ? AND exercise_id = ?`, p.Position, req.RoutineID, p.ExerciseID); err != nil {
+          UPDATE training_routine_exercises
+          SET position = ?
+          WHERE routine_id = ? AND exercise_id = ?`, p.Position, req.RoutineID, p.ExerciseID); err != nil {
 			tx.Rollback()
 			http.Error(w, "Failed to update positions", http.StatusInternalServerError)
 			return
@@ -733,9 +867,9 @@ func handleAPIWorkoutReorderExercises(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, p := range req.Positions {
 		if _, err := tx.Exec(`
-			UPDATE training_workout_exercises
-			SET position = ?
-			WHERE workout_id = ? AND exercise_id = ?`, p.Position, req.WorkoutID, p.ExerciseID); err != nil {
+          UPDATE training_workout_exercises
+          SET position = ?
+          WHERE workout_id = ? AND exercise_id = ?`, p.Position, req.WorkoutID, p.ExerciseID); err != nil {
 			tx.Rollback()
 			http.Error(w, "Failed to update positions", http.StatusInternalServerError)
 			return
@@ -775,11 +909,11 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	workoutID, _ := res.LastInsertId()
 
 	rows, err := db.Query(`
-	SELECT re.id, re.exercise_id, e.name, re.position
-	FROM training_routine_exercises re
-	JOIN training_exercises e ON e.id = re.exercise_id
-	WHERE re.routine_id = ?
-	ORDER BY re.position`, req.RoutineID)
+    SELECT re.id, re.exercise_id, e.name, re.position
+    FROM training_routine_exercises re
+    JOIN training_exercises e ON e.id = re.exercise_id
+    WHERE re.routine_id = ?
+    ORDER BY re.position`, req.RoutineID)
 	if err != nil {
 		http.Error(w, "Failed to fetch routine exercises", http.StatusInternalServerError)
 		return
@@ -824,13 +958,13 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 		lSets := []LastSetValue{}
 		var lastWeID int
 		err = db.QueryRow(`
-			SELECT we.id 
-			FROM training_workout_exercises we 
-			JOIN training_workouts w ON w.id = we.workout_id 
-			JOIN training_workout_sets s ON s.workout_exercise_id = we.id
-			WHERE w.user_id = ? AND we.exercise_id = ? AND w.id != ? 
-			GROUP BY we.id
-			ORDER BY w.date DESC, w.id DESC LIMIT 1`, req.UserID, re.exerciseID, workoutID).Scan(&lastWeID)
+          SELECT we.id 
+          FROM training_workout_exercises we 
+          JOIN training_workouts w ON w.id = we.workout_id 
+          JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+          WHERE w.user_id = ? AND we.exercise_id = ? AND w.id != ? 
+          GROUP BY we.id
+          ORDER BY w.date DESC, w.id DESC LIMIT 1`, req.UserID, re.exerciseID, workoutID).Scan(&lastWeID)
 		if err == nil {
 			lsRows, _ := db.Query(`SELECT set_number, weight_kg, reps, rir FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, lastWeID)
 			for lsRows.Next() {
@@ -1107,8 +1241,8 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 	var resp WorkoutDetailResponse
 
 	err = db.QueryRow(`
-		SELECT id, date, COALESCE((SELECT name FROM training_routines WHERE id = routine_id), 'Custom workout') 
-		FROM training_workouts WHERE id = ?`, workoutID).Scan(&resp.WorkoutID, &resp.Date, &resp.RoutineName)
+       SELECT id, date, COALESCE((SELECT name FROM training_routines WHERE id = routine_id), 'Custom workout') 
+       FROM training_workouts WHERE id = ?`, workoutID).Scan(&resp.WorkoutID, &resp.Date, &resp.RoutineName)
 
 	if err != nil {
 		http.Error(w, "Workout not found", http.StatusNotFound)
@@ -1118,10 +1252,10 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 	resp.Exercises = []WorkoutDetailExercise{}
 
 	rows, err := db.Query(`
-		SELECT we.id, we.exercise_id, e.name, we.position 
-		FROM training_workout_exercises we 
-		JOIN training_exercises e ON e.id = we.exercise_id 
-		WHERE we.workout_id = ? ORDER BY we.position`, workoutID)
+       SELECT we.id, we.exercise_id, e.name, we.position 
+       FROM training_workout_exercises we 
+       JOIN training_exercises e ON e.id = we.exercise_id 
+       WHERE we.workout_id = ? ORDER BY we.position`, workoutID)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -1130,9 +1264,9 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 			ex.Sets = []WorkoutDetailSet{}
 
 			setRows, errSet := db.Query(`
-				SELECT id, set_number, weight_kg, reps, rir 
-				FROM training_workout_sets 
-				WHERE workout_exercise_id = ? ORDER BY set_number`, ex.WorkoutExerciseID)
+             SELECT id, set_number, weight_kg, reps, rir 
+             FROM training_workout_sets 
+             WHERE workout_exercise_id = ? ORDER BY set_number`, ex.WorkoutExerciseID)
 			if errSet == nil {
 				for setRows.Next() {
 					var s WorkoutDetailSet
@@ -1272,15 +1406,15 @@ func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `
-		SELECT 
-			w.date as log_date,
-			COALESCE(MAX(s.weight_kg), 0) as max_w,
-			COALESCE(MAX(s.weight_kg * (1.0 + (s.reps / 30.0))), 0) as max_1rm,
-			COALESCE(SUM(s.weight_kg * s.reps), 0) as total_vol
-		FROM training_workout_exercises we
-		JOIN training_workouts w ON w.id = we.workout_id
-		JOIN training_workout_sets s ON s.workout_exercise_id = we.id
-		WHERE we.exercise_id = ? AND w.user_id = ?`
+       SELECT 
+          w.date as log_date,
+          COALESCE(MAX(s.weight_kg), 0) as max_w,
+          COALESCE(MAX(s.weight_kg * (1.0 + (s.reps / 30.0))), 0) as max_1rm,
+          COALESCE(SUM(s.weight_kg * s.reps), 0) as total_vol
+       FROM training_workout_exercises we
+       JOIN training_workouts w ON w.id = we.workout_id
+       JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+       WHERE we.exercise_id = ? AND w.user_id = ?`
 
 	var args []interface{}
 	if interval == "" {
@@ -1339,18 +1473,18 @@ func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(`
-		SELECT 
-			w.id,
-			DATE(w.date) as log_date,
-			COALESCE(SUM(s.weight_kg * s.reps), 0) as total_volume,
-			COALESCE(SUM(s.reps), 0) as total_reps
-		FROM training_workouts w
-		JOIN training_workout_exercises we ON we.workout_id = w.id
-		JOIN training_workout_sets s ON s.workout_exercise_id = we.id
-		WHERE w.routine_id = ? AND w.user_id = ?
-		GROUP BY w.id
-		HAVING total_volume > 0
-		ORDER BY w.date ASC, w.id ASC`, routineID, userID)
+       SELECT 
+          w.id,
+          DATE(w.date) as log_date,
+          COALESCE(SUM(s.weight_kg * s.reps), 0) as total_volume,
+          COALESCE(SUM(s.reps), 0) as total_reps
+       FROM training_workouts w
+       JOIN training_workout_exercises we ON we.workout_id = w.id
+       JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+       WHERE w.routine_id = ? AND w.user_id = ?
+       GROUP BY w.id
+       HAVING total_volume > 0
+       ORDER BY w.date ASC, w.id ASC`, routineID, userID)
 	if err != nil {
 		http.Error(w, "Query error", http.StatusInternalServerError)
 		return
@@ -1404,10 +1538,10 @@ func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := tx.Exec(`
-		DELETE FROM training_workout_sets 
-		WHERE workout_exercise_id IN (
-			SELECT id FROM training_workout_exercises WHERE workout_id = ?
-		)`, req.WorkoutID); err != nil {
+       DELETE FROM training_workout_sets 
+       WHERE workout_exercise_id IN (
+          SELECT id FROM training_workout_exercises WHERE workout_id = ?
+       )`, req.WorkoutID); err != nil {
 		tx.Rollback()
 		http.Error(w, "Failed to clean old sets", http.StatusInternalServerError)
 		return
@@ -1421,8 +1555,8 @@ func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
 
 	for exPos, ex := range req.Exercises {
 		res, err := tx.Exec(`
-			INSERT INTO training_workout_exercises (workout_id, exercise_id, position) 
-			VALUES (?, ?, ?)`, req.WorkoutID, ex.ExerciseID, exPos+1)
+          INSERT INTO training_workout_exercises (workout_id, exercise_id, position) 
+          VALUES (?, ?, ?)`, req.WorkoutID, ex.ExerciseID, exPos+1)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, "Failed to insert workout exercise", http.StatusInternalServerError)
@@ -1432,8 +1566,8 @@ func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
 
 		for sPos, s := range ex.Sets {
 			_, err := tx.Exec(`
-				INSERT INTO training_workout_sets (workout_exercise_id, set_number, weight_kg, reps, rir, set_type) 
-				VALUES (?, ?, ?, ?, ?, 'standard')`,
+             INSERT INTO training_workout_sets (workout_exercise_id, set_number, weight_kg, reps, rir, set_type) 
+             VALUES (?, ?, ?, ?, ?, 'standard')`,
 				newWeID, sPos+1, s.WeightKg, s.Reps, s.Rir)
 			if err != nil {
 				tx.Rollback()
@@ -1539,8 +1673,8 @@ func handleAPIUserAlgorithms(w http.ResponseWriter, r *http.Request) {
 
 		var showRirInt int
 		err := db.QueryRow(`
-			SELECT warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage, COALESCE(show_rir, 1)
-			FROM user_algorithm_settings WHERE user_id = ?`, userID).
+          SELECT warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage, COALESCE(show_rir, 1)
+          FROM user_algorithm_settings WHERE user_id = ?`, userID).
 			Scan(&s.WarmupEnabled, &s.WarmupBase, &s.DropEnabled, &s.DropPercentage, &s.BackoffEnabled, &s.BackoffPercentage, &showRirInt)
 
 		if err != nil && err != sql.ErrNoRows {
@@ -1570,16 +1704,16 @@ func handleAPIUserAlgorithms(w http.ResponseWriter, r *http.Request) {
 		}
 
 		_, err := db.Exec(`
-			INSERT INTO user_algorithm_settings (user_id, warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage, show_rir)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(user_id) DO UPDATE SET
-				warmup_enabled = excluded.warmup_enabled,
-				warmup_base = excluded.warmup_base,
-				drop_enabled = excluded.drop_enabled,
-				drop_percentage = excluded.drop_percentage,
-				backoff_enabled = excluded.backoff_enabled,
-				backoff_percentage = excluded.backoff_percentage,
-				show_rir = excluded.show_rir`,
+          INSERT INTO user_algorithm_settings (user_id, warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage, show_rir)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(user_id) DO UPDATE SET
+             warmup_enabled = excluded.warmup_enabled,
+             warmup_base = excluded.warmup_base,
+             drop_enabled = excluded.drop_enabled,
+             drop_percentage = excluded.drop_percentage,
+             backoff_enabled = excluded.backoff_enabled,
+             backoff_percentage = excluded.backoff_percentage,
+             show_rir = excluded.show_rir`,
 			s.UserID, s.WarmupEnabled, s.WarmupBase, s.DropEnabled, s.DropPercentage, s.BackoffEnabled, s.BackoffPercentage, showRirInt)
 
 		if err != nil {
@@ -1652,10 +1786,10 @@ func handleAPIUserWeightHistory(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.Query(`
-		SELECT date, weight_kg 
-		FROM user_daily_metrics 
-		WHERE user_id = ? AND weight_kg IS NOT NULL AND weight_kg > 0 
-		ORDER BY date ASC`, userID)
+       SELECT date, weight_kg 
+       FROM user_daily_metrics 
+       WHERE user_id = ? AND weight_kg IS NOT NULL AND weight_kg > 0 
+       ORDER BY date ASC`, userID)
 	if err != nil {
 		http.Error(w, "Query error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1694,13 +1828,12 @@ func handleAPIGetDailyMetricsToday(w http.ResponseWriter, r *http.Request) {
 
 	var resp DailyMetricsTodayResp
 	resp.Date = ""
-	resp.StepsCount = 0
 
 	err = db.QueryRow(`
-		SELECT date, steps_count, weight_kg 
-		FROM user_daily_metrics 
-		WHERE user_id = ? AND date = date('now')`, userID).
-		Scan(&resp.Date, &resp.StepsCount, &resp.WeightKg)
+       SELECT date, weight_kg 
+       FROM user_daily_metrics 
+       WHERE user_id = ? AND date = date('now')`, userID).
+		Scan(&resp.Date, &resp.WeightKg)
 
 	if err == sql.ErrNoRows {
 		_ = db.QueryRow(`SELECT date('now')`).Scan(&resp.Date)
@@ -1711,42 +1844,6 @@ func handleAPIGetDailyMetricsToday(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
-}
-
-func handleAPIUpdateDailySteps(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req UpdateStepsReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid body", http.StatusBadRequest)
-		return
-	}
-	if req.UserID == 0 {
-		req.UserID = 1
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
-		return
-	}
-	defer db.Close()
-
-	_, err = db.Exec(`
-		INSERT INTO user_daily_metrics (user_id, date, steps_count)
-		VALUES (?, date('now'), ?)
-		ON CONFLICT(user_id, date) DO UPDATE SET steps_count = excluded.steps_count`,
-		req.UserID, req.StepsCount)
-
-	if err != nil {
-		http.Error(w, "Database save error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
 }
 
 // -------------------------------------------------------------
@@ -1767,42 +1864,22 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
-		var s UserDietSettingsModel
-		s.UserID = 1
-		s.HeightCm = 174.0
-		s.TargetWeightKg = 78.0
-		s.TargetKcal = 2700.0
-		s.TargetProtein = 140.0
-		s.TargetFat = 75.0
-		s.TargetCarbs = 350.0
+		kcal, p, f, c, curWeight, height, goal, targetWeight := calculateDynamicTargets(db, userID, "now")
 
-		_ = db.QueryRow(`
-			SELECT weight_kg FROM user_daily_metrics 
-			WHERE user_id = ? AND weight_kg > 0 
-			ORDER BY date DESC, id DESC LIMIT 1`, userID).Scan(&s.CurrentWeightKg)
-
-		if s.CurrentWeightKg == 0 {
-			s.CurrentWeightKg = 70.0
-		}
-
-		var surplus, pPerKg, fPerKg float64
-		err := db.QueryRow(`
-			SELECT height_cm, target_weight_kg, surplus_kcal, target_p_per_kg, target_f_per_kg
-			FROM user_diet_settings WHERE user_id = ?`, userID).
-			Scan(&s.HeightCm, &s.TargetWeightKg, &surplus, &pPerKg, &fPerKg)
-
-		if err == nil {
-			s.TargetKcal = 2400.0 + surplus
-			s.TargetProtein = pPerKg * s.TargetWeightKg
-			s.TargetFat = fPerKg * s.TargetWeightKg
-			remainingCalories := s.TargetKcal - (s.TargetProtein*4.0 + s.TargetFat*9.0)
-			if remainingCalories > 0 {
-				s.TargetCarbs = remainingCalories / 4.0
-			}
+		resp := UserDietSettingsModel{
+			UserID:          1,
+			HeightCm:        height,
+			CurrentWeightKg: curWeight,
+			TargetWeightKg:  targetWeight,
+			Goal:            goal,
+			TargetKcal:      kcal,
+			TargetProtein:   p,
+			TargetFat:       f,
+			TargetCarbs:     c,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(s)
+		json.NewEncoder(w).Encode(resp)
 		return
 	}
 
@@ -1816,6 +1893,10 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 			req.UserID = 1
 		}
 
+		if req.Goal == "" {
+			req.Goal = "bulk"
+		}
+
 		tx, err := db.Begin()
 		if err != nil {
 			http.Error(w, "Database error", http.StatusInternalServerError)
@@ -1824,35 +1905,25 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 
 		if req.CurrentWeightKg > 0 {
 			_, _ = tx.Exec(`
-				INSERT INTO user_daily_metrics (user_id, date, weight_kg)
-				VALUES (?, date('now'), ?)
-				ON CONFLICT(user_id, date) DO UPDATE SET weight_kg = excluded.weight_kg`,
+             INSERT INTO user_daily_metrics (user_id, date, weight_kg)
+             VALUES (?, date('now'), ?)
+             ON CONFLICT(user_id, date) DO UPDATE SET weight_kg = excluded.weight_kg`,
 				req.UserID, req.CurrentWeightKg)
 		}
 
-		surplus := req.TargetKcal - 2400.0
-		pPerKg := 2.0
-		fPerKg := 1.0
-		if req.TargetWeightKg > 0 {
-			pPerKg = req.TargetProtein / req.TargetWeightKg
-			fPerKg = req.TargetFat / req.TargetWeightKg
-		}
-
 		_, err = tx.Exec(`
-			INSERT INTO user_diet_settings (user_id, height_cm, target_weight_kg, surplus_kcal, target_p_per_kg, target_f_per_kg, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-			ON CONFLICT(user_id) DO UPDATE SET
-				height_cm = excluded.height_cm,
-				target_weight_kg = excluded.target_weight_kg,
-				surplus_kcal = excluded.surplus_kcal,
-				target_p_per_kg = excluded.target_p_per_kg,
-				target_f_per_kg = excluded.target_f_per_kg,
-				updated_at = datetime('now')`,
-			req.UserID, req.HeightCm, req.TargetWeightKg, surplus, pPerKg, fPerKg)
+          INSERT INTO user_diet_settings (user_id, height_cm, target_weight_kg, goal, updated_at)
+          VALUES (?, ?, ?, ?, datetime('now'))
+          ON CONFLICT(user_id) DO UPDATE SET
+             height_cm = excluded.height_cm,
+             target_weight_kg = excluded.target_weight_kg,
+             goal = excluded.goal,
+             updated_at = datetime('now')`,
+			req.UserID, req.HeightCm, req.TargetWeightKg, req.Goal)
 
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, "Failed to save diet settings", http.StatusInternalServerError)
+			http.Error(w, "Failed to save diet settings: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -1878,8 +1949,8 @@ func handleAPIDietProducts(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.Query(`
-		SELECT id, name, brand, barcode, package_weight, serving_size, kcal, protein, fat, carbs 
-		FROM diet_products ORDER BY name ASC`)
+       SELECT id, name, brand, barcode, package_weight, serving_size, kcal, protein, fat, carbs 
+       FROM diet_products ORDER BY name ASC`)
 	if err != nil {
 		http.Error(w, "Failed to fetch products", http.StatusInternalServerError)
 		return
@@ -1923,8 +1994,8 @@ func handleAPIDietProductCreate(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	res, err := db.Exec(`
-		INSERT INTO diet_products (name, brand, barcode, package_weight, serving_size, kcal, protein, fat, carbs)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       INSERT INTO diet_products (name, brand, barcode, package_weight, serving_size, kcal, protein, fat, carbs)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		strings.TrimSpace(req.Name), req.Brand, req.Barcode, req.PackageWeight, req.ServingSize, req.Kcal, req.Protein, req.Fat, req.Carbs)
 
 	if err != nil {
@@ -1971,57 +2042,43 @@ func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
+	targetKcal, targetP, targetF, targetC, _, _, _, _ := calculateDynamicTargets(db, userID, dateStr)
+
 	var resp DailyDietSummaryResp
-	resp.TargetKcal = 2700.0
-	resp.TargetP = 140.0
-	resp.TargetF = 75.0
-	resp.TargetC = 350.0
+	resp.TargetKcal = targetKcal
+	resp.TargetP = targetP
+	resp.TargetF = targetF
+	resp.TargetC = targetC
 	resp.Logs = []DietLogItem{}
 
-	var surplus, targetWeight, pPerKg, fPerKg float64
-	err = db.QueryRow(`
-		SELECT target_weight_kg, surplus_kcal, target_p_per_kg, target_f_per_kg 
-		FROM user_diet_settings WHERE user_id = ?`, userID).
-		Scan(&targetWeight, &surplus, &pPerKg, &fPerKg)
-
-	if err == nil {
-		resp.TargetKcal = 2400.0 + surplus
-		resp.TargetP = pPerKg * targetWeight
-		resp.TargetF = fPerKg * targetWeight
-		remainingCalories := resp.TargetKcal - (resp.TargetP*4.0 + resp.TargetF*9.0)
-		if remainingCalories > 0 {
-			resp.TargetC = remainingCalories / 4.0
-		}
-	}
-
 	rows, err := db.Query(`
-		SELECT 
-			l.id, 
-			COALESCE(l.product_id, 0), 
-			COALESCE(p.name, l.custom_name, 'Custom entry'), 
-			l.amount,
-			CASE 
-				WHEN l.product_id IS NOT NULL THEN COALESCE(p.kcal, 0) * (l.amount / 100.0)
-				ELSE COALESCE(l.kcal, 0) * (l.amount / 100.0)
-			END as calculated_kcal,
-			CASE 
-				WHEN l.product_id IS NOT NULL THEN COALESCE(p.protein, 0) * (l.amount / 100.0)
-				ELSE COALESCE(l.protein, 0) * (l.amount / 100.0)
-			END as calculated_p,
-			CASE 
-				WHEN l.product_id IS NOT NULL THEN COALESCE(p.fat, 0) * (l.amount / 100.0)
-				ELSE COALESCE(l.fat, 0) * (l.amount / 100.0)
-			END as calculated_f,
-			CASE 
-				WHEN l.product_id IS NOT NULL THEN COALESCE(p.carbs, 0) * (l.amount / 100.0)
-				ELSE COALESCE(l.carbs, 0) * (l.amount / 100.0)
-			END as calculated_c,
-			strftime('%H:%M', l.logged_at) as log_time,
-			p.serving_size
-		FROM diet_logs l
-		LEFT JOIN diet_products p ON p.id = l.product_id
-		WHERE l.user_id = ? AND date(l.logged_at) = date(?)
-		ORDER BY l.logged_at DESC, l.id DESC`, userID, dateStr)
+       SELECT 
+          l.id, 
+          COALESCE(l.product_id, 0), 
+          COALESCE(p.name, l.custom_name, 'Custom entry'), 
+          l.amount,
+          CASE 
+             WHEN l.product_id IS NOT NULL THEN COALESCE(p.kcal, 0) * (l.amount / 100.0)
+             ELSE COALESCE(l.kcal, 0) * (l.amount / 100.0)
+          END as calculated_kcal,
+          CASE 
+             WHEN l.product_id IS NOT NULL THEN COALESCE(p.protein, 0) * (l.amount / 100.0)
+             ELSE COALESCE(l.protein, 0) * (l.amount / 100.0)
+          END as calculated_p,
+          CASE 
+             WHEN l.product_id IS NOT NULL THEN COALESCE(p.fat, 0) * (l.amount / 100.0)
+             ELSE COALESCE(l.fat, 0) * (l.amount / 100.0)
+          END as calculated_f,
+          CASE 
+             WHEN l.product_id IS NOT NULL THEN COALESCE(p.carbs, 0) * (l.amount / 100.0)
+             ELSE COALESCE(l.carbs, 0) * (l.amount / 100.0)
+          END as calculated_c,
+          strftime('%H:%M', l.logged_at) as log_time,
+          p.serving_size
+       FROM diet_logs l
+       LEFT JOIN diet_products p ON p.id = l.product_id
+       WHERE l.user_id = ? AND date(l.logged_at) = date(?)
+       ORDER BY l.logged_at DESC, l.id DESC`, userID, dateStr)
 
 	if err == nil {
 		defer rows.Close()
@@ -2046,9 +2103,104 @@ func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func handleAPIDietAdaptation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "1"
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var curWeight float64
+	_ = db.QueryRow(`
+       SELECT weight_kg FROM user_daily_metrics 
+       WHERE user_id = ? AND weight_kg > 0 
+       ORDER BY date DESC, id DESC LIMIT 1`, userID).Scan(&curWeight)
+
+	var goal string = "bulk"
+	_ = db.QueryRow(`SELECT COALESCE(goal, 'bulk') FROM user_diet_settings WHERE user_id = ?`, userID).Scan(&goal)
+
+	var avgW7d, avgW14d sql.NullFloat64
+	_ = db.QueryRow(`
+       SELECT AVG(weight_kg) FROM user_daily_metrics 
+       WHERE user_id = ? AND date >= date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgW7d)
+	_ = db.QueryRow(`
+       SELECT AVG(weight_kg) FROM user_daily_metrics 
+       WHERE user_id = ? AND date >= date('now', '-14 days') AND date < date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgW14d)
+
+	var avgKcal7d sql.NullFloat64
+	_ = db.QueryRow(`
+       SELECT AVG(day_kcal) FROM (
+          SELECT SUM(
+             CASE 
+                WHEN l.product_id IS NOT NULL THEN COALESCE(p.kcal, 0) * (l.amount / 100.0)
+                ELSE COALESCE(l.kcal, 0) * (l.amount / 100.0)
+             END
+          ) as day_kcal
+          FROM diet_logs l
+          LEFT JOIN diet_products p ON p.id = l.product_id
+          WHERE l.user_id = ? AND date(l.logged_at) >= date('now', '-7 days')
+          GROUP BY date(l.logged_at)
+       )`, userID).Scan(&avgKcal7d)
+
+	report := DietAdaptationReport{
+		CurrentWeight:    curWeight,
+		WeeklyChangeKg:   0.0,
+		AverageKcal7Days: avgKcal7d.Float64,
+		Recommendation:   "Maintaining consistent pace",
+	}
+
+	if avgW7d.Valid && avgW14d.Valid && avgW14d.Float64 > 0 {
+		delta := avgW7d.Float64 - avgW14d.Float64
+		report.WeeklyChangeKg = delta
+
+		switch strings.ToLower(goal) {
+		case "bulk":
+			if delta < 0.25 {
+				report.Recommendation = "Weight gain is slow for semi dirty bulk. Auto-adjusting +150 kcal."
+				report.DeltaKcalSuggested = 150.0
+			} else if delta > 0.80 {
+				report.Recommendation = "Gaining too quickly. Auto-reducing surplus by -150 kcal to protect body composition."
+				report.DeltaKcalSuggested = -150.0
+			} else {
+				report.Recommendation = "Optimal muscle-building pace (+0.3 to +0.7 kg/week)."
+			}
+		case "cut":
+			if delta > -0.15 {
+				report.Recommendation = "Weight loss stalled. Auto-adjusting deficit by -150 kcal."
+				report.DeltaKcalSuggested = -150.0
+			} else if delta < -0.85 {
+				report.Recommendation = "Losing weight too fast. Adding +100 kcal to preserve muscle tissue."
+				report.DeltaKcalSuggested = 100.0
+			} else {
+				report.Recommendation = "Optimal fat loss pace (-0.4 to -0.8 kg/week)."
+			}
+		case "recomp":
+			report.Recommendation = "Recomposition active. Weight should remain relatively flat while strength climbs."
+		default:
+			report.Recommendation = "Maintenance mode active."
+		}
+	} else {
+		report.Recommendation = "Collecting more daily weight logs (need 14 days of metrics for feedback loop)."
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
 func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -2071,13 +2223,13 @@ func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {
 
 	if req.Date != "" && req.Date != "now" {
 		_, err = db.Exec(`
-			INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
-			VALUES (?, ?, ?, datetime(?, '12:00:00'))`,
+          INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
+          VALUES (?, ?, ?, datetime(?, '12:00:00'))`,
 			req.UserID, req.ProductID, req.AmountG, req.Date)
 	} else {
 		_, err = db.Exec(`
-			INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
-			VALUES (?, ?, ?, datetime('now'))`,
+          INSERT INTO diet_logs (user_id, product_id, amount, logged_at) 
+          VALUES (?, ?, ?, datetime('now'))`,
 			req.UserID, req.ProductID, req.AmountG)
 	}
 
@@ -2121,13 +2273,13 @@ func handleAPICustomDietLog(w http.ResponseWriter, r *http.Request) {
 
 	if req.Date != "" && req.Date != "now" {
 		query = `
-			INSERT INTO diet_logs (user_id, product_id, custom_name, amount, kcal, protein, fat, carbs, logged_at) 
-			VALUES (?, NULL, ?, 100.0, ?, ?, ?, ?, datetime(?, '12:00:00'))`
+          INSERT INTO diet_logs (user_id, product_id, custom_name, amount, kcal, protein, fat, carbs, logged_at) 
+          VALUES (?, NULL, ?, 100.0, ?, ?, ?, ?, datetime(?, '12:00:00'))`
 		args = []interface{}{req.UserID, strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs, req.Date}
 	} else {
 		query = `
-			INSERT INTO diet_logs (user_id, product_id, custom_name, amount, kcal, protein, fat, carbs, logged_at) 
-			VALUES (?, NULL, ?, 100.0, ?, ?, ?, ?, datetime('now'))`
+          INSERT INTO diet_logs (user_id, product_id, custom_name, amount, kcal, protein, fat, carbs, logged_at) 
+          VALUES (?, NULL, ?, 100.0, ?, ?, ?, ?, datetime('now'))`
 		args = []interface{}{req.UserID, strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs}
 	}
 

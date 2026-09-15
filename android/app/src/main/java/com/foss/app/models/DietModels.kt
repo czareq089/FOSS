@@ -3,14 +3,15 @@ package com.foss.app.models
 import com.google.gson.annotations.SerializedName
 
 data class UserDietSettings(
-    @SerializedName("user_id") val userId: Int,
+    @SerializedName("user_id") val userId: Int = 1,
     @SerializedName("height_cm") val heightCm: Double,
     @SerializedName("current_weight_kg") val currentWeightKg: Double,
     @SerializedName("target_weight_kg") val targetWeightKg: Double,
-    @SerializedName("target_kcal") val targetKcal: Double,
-    @SerializedName("target_protein") val targetProtein: Double,
-    @SerializedName("target_fat") val targetFat: Double,
-    @SerializedName("target_carbs") val targetCarbs: Double
+    @SerializedName("goal") val goal: String = "bulk",
+    @SerializedName("target_kcal") val targetKcal: Double = 0.0,
+    @SerializedName("target_protein") val targetProtein: Double = 0.0,
+    @SerializedName("target_fat") val targetFat: Double = 0.0,
+    @SerializedName("target_carbs") val targetCarbs: Double = 0.0
 )
 
 data class DietProduct(
@@ -44,11 +45,19 @@ data class DailyDietSummary(
     @SerializedName("consumed_p") val consumedP: Double = 0.0,
     @SerializedName("consumed_f") val consumedF: Double = 0.0,
     @SerializedName("consumed_c") val consumedC: Double = 0.0,
-    @SerializedName("target_kcal") val targetKcal: Double = 2700.0,
-    @SerializedName("target_p") val targetP: Double = 140.0,
-    @SerializedName("target_f") val targetF: Double = 75.0,
-    @SerializedName("target_c") val targetC: Double = 350.0,
+    @SerializedName("target_kcal") val targetKcal: Double = 0.0,
+    @SerializedName("target_p") val targetP: Double = 0.0,
+    @SerializedName("target_f") val targetF: Double = 0.0,
+    @SerializedName("target_c") val targetC: Double = 0.0,
     @SerializedName("logs") val logs: List<DietLogEntry> = emptyList()
+)
+
+data class DietAdaptationReport(
+    @SerializedName("current_weight") val currentWeight: Double,
+    @SerializedName("weekly_change_kg") val weeklyChangeKg: Double,
+    @SerializedName("average_kcal_7d") val averageKcal7Days: Double,
+    @SerializedName("recommendation") val recommendation: String,
+    @SerializedName("delta_kcal_suggested") val deltaKcalSuggested: Double
 )
 
 data class LogDietRequest(

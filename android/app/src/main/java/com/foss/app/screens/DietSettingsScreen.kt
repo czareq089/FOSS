@@ -54,6 +54,13 @@ import kotlin.math.roundToInt
 private val RANGES = listOf("1m" to "1M", "3m" to "3M", "6m" to "6M", "1y" to "1Y", "all" to "All")
 private val TargetColor = Color(0xFF34D399)
 
+private val GOALS = listOf(
+    "bulk" to "Semi Dirty Bulk",
+    "cut" to "Cut",
+    "recomp" to "Recomp",
+    "maintain" to "Maintain"
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DietSettingsScreen(
@@ -73,10 +80,12 @@ fun DietSettingsScreen(
     var heightInput by remember { mutableStateOf("174") }
     var currentWeightInput by remember { mutableStateOf("70.0") }
     var targetWeightInput by remember { mutableStateOf("78.0") }
-    var targetKcalInput by remember { mutableStateOf("2700") }
-    var targetProteinInput by remember { mutableStateOf("140") }
-    var targetFatInput by remember { mutableStateOf("75") }
-    var targetCarbsInput by remember { mutableStateOf("350") }
+    var selectedGoal by remember { mutableStateOf("bulk") }
+
+    var targetKcalDisplay by remember { mutableStateOf("2700") }
+    var targetProteinDisplay by remember { mutableStateOf("140") }
+    var targetFatDisplay by remember { mutableStateOf("75") }
+    var targetCarbsDisplay by remember { mutableStateOf("350") }
 
     LaunchedEffect(state) {
         if (state is UiState.Success) {
@@ -84,10 +93,12 @@ fun DietSettingsScreen(
             heightInput = if (d.heightCm % 1.0 == 0.0) d.heightCm.toInt().toString() else d.heightCm.toString()
             currentWeightInput = if (d.currentWeightKg % 1.0 == 0.0) d.currentWeightKg.toInt().toString() else d.currentWeightKg.toString()
             targetWeightInput = if (d.targetWeightKg % 1.0 == 0.0) d.targetWeightKg.toInt().toString() else d.targetWeightKg.toString()
-            targetKcalInput = d.targetKcal.toInt().toString()
-            targetProteinInput = d.targetProtein.toInt().toString()
-            targetFatInput = d.targetFat.toInt().toString()
-            targetCarbsInput = d.targetCarbs.toInt().toString()
+            selectedGoal = if (d.goal.isNotEmpty()) d.goal else "bulk"
+
+            targetKcalDisplay = d.targetKcal.toInt().toString()
+            targetProteinDisplay = d.targetProtein.toInt().toString()
+            targetFatDisplay = d.targetFat.toInt().toString()
+            targetCarbsDisplay = d.targetCarbs.toInt().toString()
         }
     }
 
@@ -178,10 +189,7 @@ fun DietSettingsScreen(
                                         heightCm = heightInput.toDoubleOrNull() ?: 174.0,
                                         currentWeightKg = currentWeightInput.toDoubleOrNull() ?: 70.0,
                                         targetWeightKg = targetWeightInput.toDoubleOrNull() ?: 78.0,
-                                        targetKcal = targetKcalInput.toDoubleOrNull() ?: 2700.0,
-                                        targetProtein = targetProteinInput.toDoubleOrNull() ?: 140.0,
-                                        targetFat = targetFatInput.toDoubleOrNull() ?: 75.0,
-                                        targetCarbs = targetCarbsInput.toDoubleOrNull() ?: 350.0,
+                                        goal = selectedGoal,
                                         userId = 1
                                     )
                                     val ok = viewModel.saveUserDietSettings(payload)
@@ -224,6 +232,70 @@ fun DietSettingsScreen(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        // 1. Wybór celu (Goal)
+                        OutlinedCard(
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("Dietary Strategy", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = "Choose your objective. The algorithm calculates your daily macro and calories automatically.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    GOALS.forEach { (key, label) ->
+                                        val isSelected = selectedGoal == key
+                                        OutlinedCard(
+                                            onClick = { selectedGoal = key },
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, if (isSelected) AccentBlue else MaterialTheme.colorScheme.outline),
+                                            colors = CardDefaults.outlinedCardColors(
+                                                containerColor = if (isSelected) AccentBlue.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Column {
+                                                    Text(
+                                                        text = label,
+                                                        style = MaterialTheme.typography.titleSmall,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (isSelected) AccentBlue else MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                    val subtext = when (key) {
+                                                        "bulk" -> "Aggressive strength & size (+500 kcal, fat: 1.4g/kg)"
+                                                        "cut" -> "Fat loss with muscle retention (-400 kcal, high protein)"
+                                                        "recomp" -> "Calorie cycling: surplus on workout days, deficit on rest"
+                                                        else -> "Stable energy balance and weight maintenance"
+                                                    }
+                                                    Text(
+                                                        text = subtext,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                RadioButton(
+                                                    selected = isSelected,
+                                                    onClick = { selectedGoal = key }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Wymiary ciała
                         OutlinedCard(
                             shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -266,6 +338,7 @@ fun DietSettingsScreen(
                             }
                         }
 
+                        // 3. Wykres wagi
                         OutlinedCard(
                             shape = RoundedCornerShape(8.dp),
                             colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -398,7 +471,6 @@ fun DietSettingsScreen(
                                             chart = rememberCartesianChart(
                                                 rememberLineCartesianLayer(
                                                     lineProvider = LineCartesianLayer.LineProvider.series(
-                                                        // Seria 0: Linia wagi (niewidoczna przy 1 punkcie, widoczna przy >=2)
                                                         rememberLine(
                                                             fill = LineCartesianLayer.LineFill.single(
                                                                 fill(if (hasSinglePoint) Color.Transparent else AccentBlue)
@@ -406,20 +478,17 @@ fun DietSettingsScreen(
                                                             pointConnector = LineCartesianLayer.PointConnector.cubic(curvature = 0f),
                                                             areaFill = null
                                                         ),
-                                                        // Seria 1: Target (zielona linia pozioma)
                                                         rememberLine(
                                                             fill = LineCartesianLayer.LineFill.single(fill(TargetColor)),
                                                             thickness = 2.dp,
                                                             pointConnector = LineCartesianLayer.PointConnector.cubic(curvature = 0f),
                                                             areaFill = null
                                                         ),
-                                                        // Seria 2: Dół 40 kg
                                                         rememberLine(
                                                             fill = LineCartesianLayer.LineFill.single(fill(Color.Transparent)),
                                                             thickness = 0.dp,
                                                             areaFill = null
                                                         ),
-                                                        // Seria 3: Góra 100 kg
                                                         rememberLine(
                                                             fill = LineCartesianLayer.LineFill.single(fill(Color.Transparent)),
                                                             thickness = 0.dp,
@@ -439,7 +508,6 @@ fun DietSettingsScreen(
                                             modifier = Modifier.fillMaxSize()
                                         )
 
-                                        // Rysujemy kropkę (punkt) wagi przy dokładnie 1 pomiarze
                                         if (hasSinglePoint) {
                                             Canvas(modifier = Modifier.fillMaxSize().padding(start = 36.dp, bottom = 24.dp, top = 8.dp, end = 8.dp)) {
                                                 val yRatio = ((activePoint.weightKg - 40.0) / 60.0).coerceIn(0.0, 1.0).toFloat()
@@ -457,54 +525,71 @@ fun DietSettingsScreen(
                             }
                         }
 
+                        // 4. Podgląd wyliczonego automatycznie celu
                         OutlinedCard(
                             shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
                         ) {
-                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text("Daily Nutrition Targets", style = MaterialTheme.typography.titleMedium)
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Computed Daily Targets", style = MaterialTheme.typography.titleMedium)
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = AccentBlue.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "Auto Calculated",
+                                            color = AccentBlue,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
 
-                                OutlinedTextField(
-                                    value = targetKcalInput,
-                                    onValueChange = { targetKcalInput = it.filter { c -> c.isDigit() || c == '.' } },
-                                    label = { Text("Target Calories (kcal)") },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                Text(
+                                    text = "Based on current weight (${currentWeightInput} kg), BMR, baseline activity, and workouts.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(
-                                        value = targetCarbsInput,
-                                        onValueChange = { targetCarbsInput = it.filter { c -> c.isDigit() || c == '.' } },
-                                        label = { Text("Carbs (g)") },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                Spacer(Modifier.height(4.dp))
 
-                                    OutlinedTextField(
-                                        value = targetFatInput,
-                                        onValueChange = { targetFatInput = it.filter { c -> c.isDigit() || c == '.' } },
-                                        label = { Text("Fats (g)") },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    OutlinedTextField(
-                                        value = targetProteinInput,
-                                        onValueChange = { targetProteinInput = it.filter { c -> c.isDigit() || c == '.' } },
-                                        label = { Text("Protein (g)") },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text("Calories", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("$targetKcalDisplay kcal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = AccentBlue)
+                                        }
+                                        Column {
+                                            Text("Carbs", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("${targetCarbsDisplay}g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        }
+                                        Column {
+                                            Text("Fats", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("${targetFatDisplay}g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        }
+                                        Column {
+                                            Text("Protein", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("${targetProteinDisplay}g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
                                 }
                             }
                         }

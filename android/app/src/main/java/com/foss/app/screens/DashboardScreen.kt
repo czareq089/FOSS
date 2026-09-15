@@ -17,11 +17,9 @@ import androidx.compose.ui.unit.dp
 import com.foss.app.AppViewModel
 import com.foss.app.UiState
 import com.foss.app.components.DietConsistencyCard
-import com.foss.app.components.StepsTrackingCard
 import com.foss.app.components.TrainingConsistencyCard
 import com.foss.app.components.VolumeWidgetCard
 import com.foss.app.ui.theme.AccentBlue
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,7 +28,6 @@ fun DashboardScreen(
     onProfileClick: () -> Unit
 ) {
     var selectedRange by remember { mutableStateOf("7d") }
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(selectedRange) {
         viewModel.loadDashboardVolume(selectedRange)
@@ -44,7 +41,6 @@ fun DashboardScreen(
 
     val workoutDates = (viewModel.consistencyStatsState.value as? UiState.Success)?.data?.workoutDates ?: emptyList()
     val dietDates = (viewModel.dietConsistencyStatsState.value as? UiState.Success)?.data?.workoutDates ?: emptyList()
-    val todaySteps = (viewModel.todayMetricsState.value as? UiState.Success)?.data?.stepsCount ?: 0
 
     Scaffold(
         topBar = {
@@ -97,15 +93,6 @@ fun DashboardScreen(
             )
 
             DietConsistencyCard(dates = dietDates)
-
-            StepsTrackingCard(
-                stepsCount = todaySteps,
-                onSaveSteps = { newSteps ->
-                    scope.launch {
-                        viewModel.saveDailySteps(newSteps)
-                    }
-                }
-            )
         }
     }
 }
