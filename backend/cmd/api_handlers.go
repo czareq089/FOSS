@@ -61,6 +61,7 @@ type LastSetValue struct {
 	WeightKg  float64 `json:"weight_kg"`
 	Reps      int     `json:"reps"`
 	Rir       int     `json:"rir"`
+	SetType   string  `json:"set_type"`
 }
 
 type RoutineExercisePreview struct {
@@ -130,6 +131,7 @@ type WorkoutDetailSet struct {
 	WeightKg  float64 `json:"weight_kg"`
 	Reps      int     `json:"reps"`
 	Rir       int     `json:"rir"`
+	SetType   string  `json:"set_type"`
 }
 
 type WorkoutDetailExercise struct {
@@ -454,6 +456,65 @@ func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, p
 // FUNKCJE OBSŁUGI API
 // ==========================================
 
+// normalizeSetType keeps the API tolerant of older clients while preserving set-specific history.
+func normalizeSetType(setType string) string {
+	switch strings.ToLower(strings.TrimSpace(setType)) {
+	case "warmup", "standard", "drop", "back_off":
+		return strings.ToLower(strings.TrimSpace(setType))
+	default:
+		return "standard"
+	}
+}
+
+// loadLastSetsByCompositeKey zwraca ostatnią znaną wartość osobno dla każdego
+// dokładnego klucza (set_number, set_type). Dzięki temu np. warmup #1 i
+// standard #1 są dwiema niezależnymi pozycjami historii autofillu.
+func loadLastSetsByCompositeKey(db *sql.DB, userID interface{}, exerciseID int, excludeWorkoutID int) []LastSetValue {
+	query := `
+        SELECT s.set_number, s.weight_kg, s.reps, s.rir, s.set_type
+        FROM training_workout_sets s
+        JOIN training_workout_exercises we ON we.id = s.workout_exercise_id
+        JOIN training_workouts w ON w.id = we.workout_id
+        WHERE w.user_id = ?
+          AND we.exercise_id = ?
+          AND (? = 0 OR w.id != ?)
+          AND we.id = (
+              SELECT we2.id
+              FROM training_workout_sets s2
+              JOIN training_workout_exercises we2 ON we2.id = s2.workout_exercise_id
+              JOIN training_workouts w2 ON w2.id = we2.workout_id
+              WHERE w2.user_id = ?
+                AND we2.exercise_id = ?
+                AND s2.set_number = s.set_number
+                AND s2.set_type = s.set_type
+                AND (? = 0 OR w2.id != ?)
+              ORDER BY w2.date DESC, w2.id DESC, we2.id DESC
+              LIMIT 1
+          )
+        ORDER BY s.set_number ASC, s.set_type ASC`
+
+	rows, err := db.Query(
+		query,
+		userID, exerciseID, excludeWorkoutID, excludeWorkoutID,
+		userID, exerciseID, excludeWorkoutID, excludeWorkoutID,
+	)
+	if err != nil {
+		return []LastSetValue{}
+	}
+	defer rows.Close()
+
+	result := []LastSetValue{}
+	for rows.Next() {
+		var item LastSetValue
+		if err := rows.Scan(&item.SetNumber, &item.WeightKg, &item.Reps, &item.Rir, &item.SetType); err != nil {
+			continue
+		}
+		item.SetType = normalizeSetType(item.SetType)
+		result = append(result, item)
+	}
+	return result
+}
+
 func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -631,28 +692,7 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 
 	for i := range exercises {
-		var lastWorkoutExerciseID int
-		err := db.QueryRow(`
-          SELECT we.id 
-          FROM training_workout_exercises we 
-          JOIN training_workouts w ON w.id = we.workout_id 
-          JOIN training_workout_sets s ON s.workout_exercise_id = we.id
-          WHERE w.user_id = ? AND we.exercise_id = ?
-          GROUP BY we.id
-          ORDER BY w.date DESC, w.id DESC LIMIT 1`, userID, exercises[i].ExerciseID).Scan(&lastWorkoutExerciseID)
-		if err == nil {
-			setRows, errSet := db.Query(`SELECT set_number, weight_kg, reps, rir FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, lastWorkoutExerciseID)
-			if errSet == nil {
-				lastSets := []LastSetValue{}
-				for setRows.Next() {
-					var s LastSetValue
-					setRows.Scan(&s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir)
-					lastSets = append(lastSets, s)
-				}
-				setRows.Close()
-				exercises[i].LastSets = lastSets
-			}
-		}
+		exercises[i].LastSets = loadLastSetsByCompositeKey(db, userID, exercises[i].ExerciseID, 0)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -955,25 +995,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 			tRows.Close()
 		}
 
-		lSets := []LastSetValue{}
-		var lastWeID int
-		err = db.QueryRow(`
-          SELECT we.id 
-          FROM training_workout_exercises we 
-          JOIN training_workouts w ON w.id = we.workout_id 
-          JOIN training_workout_sets s ON s.workout_exercise_id = we.id
-          WHERE w.user_id = ? AND we.exercise_id = ? AND w.id != ? 
-          GROUP BY we.id
-          ORDER BY w.date DESC, w.id DESC LIMIT 1`, req.UserID, re.exerciseID, workoutID).Scan(&lastWeID)
-		if err == nil {
-			lsRows, _ := db.Query(`SELECT set_number, weight_kg, reps, rir FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, lastWeID)
-			for lsRows.Next() {
-				var ls LastSetValue
-				lsRows.Scan(&ls.SetNumber, &ls.WeightKg, &ls.Reps, &ls.Rir)
-				lSets = append(lSets, ls)
-			}
-			lsRows.Close()
-		}
+		lSets := loadLastSetsByCompositeKey(db, req.UserID, re.exerciseID, int(workoutID))
 
 		exercises = append(exercises, ExerciseInfo{
 			WorkoutExerciseID: int(weID),
@@ -1264,13 +1286,13 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 			ex.Sets = []WorkoutDetailSet{}
 
 			setRows, errSet := db.Query(`
-             SELECT id, set_number, weight_kg, reps, rir 
+             SELECT id, set_number, weight_kg, reps, rir, set_type 
              FROM training_workout_sets 
              WHERE workout_exercise_id = ? ORDER BY set_number`, ex.WorkoutExerciseID)
 			if errSet == nil {
 				for setRows.Next() {
 					var s WorkoutDetailSet
-					setRows.Scan(&s.SetID, &s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir)
+					setRows.Scan(&s.SetID, &s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir, &s.SetType)
 					ex.Sets = append(ex.Sets, s)
 				}
 				setRows.Close()
@@ -1567,8 +1589,8 @@ func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
 		for sPos, s := range ex.Sets {
 			_, err := tx.Exec(`
              INSERT INTO training_workout_sets (workout_exercise_id, set_number, weight_kg, reps, rir, set_type) 
-             VALUES (?, ?, ?, ?, ?, 'standard')`,
-				newWeID, sPos+1, s.WeightKg, s.Reps, s.Rir)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+				newWeID, sPos+1, s.WeightKg, s.Reps, s.Rir, normalizeSetType(s.SetType))
 			if err != nil {
 				tx.Rollback()
 				http.Error(w, "Failed to insert workout set", http.StatusInternalServerError)

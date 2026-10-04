@@ -24,6 +24,7 @@
 __debug_bin
 /backend/bin/
 /backend/build/
+/.change_files_backup/
 
 # =========================
 # FRONTEND MOBILNY (Android/Kotlin)
@@ -53,3 +54,4 @@ Thumbs.db
 /backend/download_database.go
 /backend/seed_exercises.go
 /backend/exercises_data/
+

@@ -8,6 +8,9 @@ import androidx.lifecycle.viewModelScope
 import com.foss.app.models.*
 import com.foss.app.network.NetworkModule
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 sealed class UiState<out T> {
     object Idle : UiState<Nothing>()
@@ -36,6 +39,41 @@ class AppViewModel : ViewModel() {
 
     var workoutState = mutableStateOf<UiState<Triple<Int, Int, List<ExerciseInfo>>>>(UiState.Idle)
         private set
+
+    var activeWorkoutRoutineName = mutableStateOf<String?>(null)
+        private set
+
+    // Czas rozpoczęcia aktywnego treningu. Jest własnością ViewModelu, a nie ekranu,
+    // więc nie resetuje się po wyjściu z WorkoutLoggingScreen i powrocie.
+    var activeWorkoutStartedAtMillis = mutableStateOf<Long?>(null)
+        private set
+
+    fun activeWorkoutElapsedSeconds(nowMillis: Long = System.currentTimeMillis()): Long {
+        val startedAt = activeWorkoutStartedAtMillis.value ?: return 0L
+        return ((nowMillis - startedAt).coerceAtLeast(0L)) / 1000L
+    }
+
+    private fun parseWorkoutDateMillis(raw: String): Long? {
+        val value = raw.trim()
+        if (value.isEmpty()) return null
+        val formats = listOf(
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX"
+        )
+        for (pattern in formats) {
+            try {
+                val formatter = SimpleDateFormat(pattern, Locale.US).apply {
+                    isLenient = false
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                formatter.parse(value)?.time?.let { return it }
+            } catch (_: Exception) {
+            }
+        }
+        return null
+    }
 
     // Pamięć podręczna wpisów w aktywnym treningu: workoutExerciseId -> (setNumber -> ActiveSetDraft)
     val activeWorkoutInputs: SnapshotStateMap<Int, MutableMap<Int, ActiveSetDraft>> = mutableStateMapOf()
@@ -126,11 +164,16 @@ class AppViewModel : ViewModel() {
 
     suspend fun startWorkout(routineId: Int): Int? {
         workoutState.value = UiState.Loading
+        activeWorkoutRoutineName.value = null
         activeWorkoutInputs.clear()
         return try {
             val response = api.startWorkout(StartWorkoutRequest(routineId, currentUserId))
             val body = response.body()
             if (response.isSuccessful && body != null) {
+                activeWorkoutRoutineName.value =
+                    (routinesState.value as? UiState.Success)?.data
+                        ?.firstOrNull { it.id == body.routineId }?.name
+                activeWorkoutStartedAtMillis.value = System.currentTimeMillis()
                 workoutState.value = UiState.Success(Triple(body.workoutId, body.routineId, body.exercises))
                 body.workoutId
             } else {
@@ -145,14 +188,24 @@ class AppViewModel : ViewModel() {
 
     fun resumeWorkout(workoutId: Int) {
         val current = workoutState.value
-        if (current is UiState.Success && current.data.first == workoutId) return
+        if (current is UiState.Success && current.data.first == workoutId) {
+            if (activeWorkoutStartedAtMillis.value == null) {
+                activeWorkoutStartedAtMillis.value = System.currentTimeMillis()
+            }
+            return
+        }
 
         viewModelScope.launch {
             workoutState.value = UiState.Loading
+            activeWorkoutRoutineName.value = null
             try {
                 val response = api.getWorkoutDetails(workoutId)
                 val body = response.body()
                 if (response.isSuccessful && body != null) {
+                    activeWorkoutRoutineName.value = body.routineName
+                    activeWorkoutStartedAtMillis.value =
+                        parseWorkoutDateMillis(body.date) ?: activeWorkoutStartedAtMillis.value ?: System.currentTimeMillis()
+
                     val mappedExercises = body.exercises.map { we ->
                         ExerciseInfo(
                             workoutExerciseId = we.workoutExerciseId,
@@ -161,7 +214,7 @@ class AppViewModel : ViewModel() {
                             position = we.position,
                             templateSets = null,
                             lastSets = we.sets.map { s ->
-                                LastSetValue(s.setNumber, s.weightKg, s.reps, s.rir)
+                                LastSetValue(s.setNumber, s.weightKg, s.reps, s.rir, s.setType)
                             }
                         )
                     }
@@ -175,7 +228,7 @@ class AppViewModel : ViewModel() {
                                 reps = s.reps.toString(),
                                 rir = s.rir.toString(),
                                 confirmed = true,
-                                setType = "standard"
+                                setType = s.setType
                             )
                         }
                     }
@@ -192,7 +245,9 @@ class AppViewModel : ViewModel() {
 
     fun resetWorkoutState() {
         workoutState.value = UiState.Idle
+        activeWorkoutRoutineName.value = null
         activeWorkoutInputs.clear()
+        activeWorkoutStartedAtMillis.value = null
     }
 
     fun currentWorkoutId(): Int? = (workoutState.value as? UiState.Success)?.data?.first

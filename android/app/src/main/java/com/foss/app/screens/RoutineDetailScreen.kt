@@ -70,7 +70,6 @@ fun RoutineDetailScreen(
     onBack: () -> Unit
 ) {
     LaunchedEffect(routineId) {
-        viewModel.resetWorkoutState()
         viewModel.loadRoutineExercises(routineId)
         viewModel.loadRoutineAnalytics(routineId)
     }

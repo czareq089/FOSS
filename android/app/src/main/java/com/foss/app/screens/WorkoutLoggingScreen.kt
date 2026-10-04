@@ -35,13 +35,13 @@ import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import com.foss.app.ui.theme.setTypeColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -86,6 +86,7 @@ fun WorkoutLoggingScreen(
     workoutId: Int,
     onAddExerciseClick: () -> Unit,
     onExerciseClick: (Int) -> Unit,
+    onLeaveWorkout: () -> Unit,
     onFinish: () -> Unit,
     onCancelWorkout: () -> Unit
 ) {
@@ -101,12 +102,12 @@ fun WorkoutLoggingScreen(
     var exerciseToDelete by remember { mutableStateOf<ExerciseInfo?>(null) }
     var cancelling by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val workoutStartTime = rememberSaveable { System.currentTimeMillis() }
-    var elapsedSeconds by remember { mutableLongStateOf((System.currentTimeMillis() - workoutStartTime) / 1000) }
+    val workoutStartedAt = viewModel.activeWorkoutStartedAtMillis.value
+    var elapsedSeconds by remember(workoutId) { mutableLongStateOf(viewModel.activeWorkoutElapsedSeconds()) }
 
-    LaunchedEffect(workoutStartTime) {
+    LaunchedEffect(workoutId, workoutStartedAt) {
         while (true) {
-            elapsedSeconds = (System.currentTimeMillis() - workoutStartTime) / 1000
+            elapsedSeconds = viewModel.activeWorkoutElapsedSeconds()
             delay(1000L)
         }
     }
@@ -187,7 +188,7 @@ fun WorkoutLoggingScreen(
                 isReordering = false
             }
         } else {
-            showCancelDialog = true
+            onLeaveWorkout()
         }
     }
 
@@ -239,12 +240,16 @@ fun WorkoutLoggingScreen(
                                         isReordering = false
                                     }
                                 } else {
-                                    showCancelDialog = true
+                                    onLeaveWorkout()
                                 }
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.Close, contentDescription = if (isReordering) "Discard edits" else "Cancel workout", tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = if (isReordering) "Discard edits" else "Leave workout",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 },
                 actions = {
@@ -303,6 +308,14 @@ fun WorkoutLoggingScreen(
                                             isReordering = true
                                         },
                                         leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Cancel workout", color = MaterialTheme.colorScheme.error) },
+                                        onClick = {
+                                            isMenuExpanded = false
+                                            showCancelDialog = true
+                                        },
+                                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) }
                                     )
                                 }
                             }
@@ -415,7 +428,8 @@ fun WorkoutLoggingScreen(
                             val templateSets = exercise.templateSets ?: emptyList()
                             val totalCount = if (templateSets.isNotEmpty()) templateSets.size else maxOf(1, exercise.lastSets?.size ?: 3)
 
-                            val workingSets = exercise.lastSets?.filter { it.setNumber > 0 } ?: emptyList()
+                            val workingSets = exercise.lastSets.orEmpty()
+                                .filter { it.setType == "standard" }
                             val baselineWeight = if (algoSettings.warmupBase == "heaviest_set") {
                                 workingSets.maxOfOrNull { it.weightKg } ?: 0.0
                             } else {
@@ -429,36 +443,45 @@ fun WorkoutLoggingScreen(
 
                             for (i in 1..totalCount) {
                                 val template = templateSets.find { it.setNumber == i }
-                                val prevSet = exercise.lastSets?.find { it.setNumber == i }
                                 val currentType = template?.setType ?: "standard"
+
+                                // Autofill jest przypisany do dokładnego klucza (set_number + set_type).
+                                // Np. standard #2 NIE może dostać danych z warmup #2 ani z standard #1.
+                                val prevSet = exercise.lastSets.orEmpty().firstOrNull { previous ->
+                                    previous.setNumber == i && previous.setType == currentType
+                                }
 
                                 var calcWeight = prevSet?.weightKg ?: 0.0
                                 var calcReps = prevSet?.reps ?: 0
                                 var calcRir = prevSet?.rir ?: 0
 
-                                when (currentType) {
-                                    "warmup" -> {
-                                        if (algoSettings.warmupEnabled && baselineWeight > 0.0) {
-                                            val warmupIndex = warmupTemplates.indexOf(template) + 1
-                                            val fraction = if (totalWarmups <= 1) 0.60 else 0.50 + (0.35 * ((warmupIndex - 1).toDouble() / maxOf(1, totalWarmups - 1)))
-                                            val targetRaw = baselineWeight * fraction
-                                            calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
-                                            calcReps = if (totalWarmups <= 1) 5 else maxOf(1, 6 - (warmupIndex * 2) + 1)
-                                            calcRir = 5
+                                // Historia tego samego typu serii ma pierwszeństwo.
+                                // Algorytm procentowy jest fallbackiem tylko wtedy, gdy takiej serii wcześniej nie było.
+                                if (prevSet == null) {
+                                    when (currentType) {
+                                        "warmup" -> {
+                                            if (algoSettings.warmupEnabled && baselineWeight > 0.0) {
+                                                val warmupIndex = warmupTemplates.indexOf(template) + 1
+                                                val fraction = if (totalWarmups <= 1) 0.60 else 0.50 + (0.35 * ((warmupIndex - 1).toDouble() / maxOf(1, totalWarmups - 1)))
+                                                val targetRaw = baselineWeight * fraction
+                                                calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
+                                                calcReps = if (totalWarmups <= 1) 5 else maxOf(1, 6 - (warmupIndex * 2) + 1)
+                                                calcRir = 5
+                                            }
                                         }
-                                    }
-                                    "drop" -> {
-                                        if (algoSettings.dropEnabled && baselineWeight > 0.0) {
-                                            val targetRaw = baselineWeight * (1.0 - (algoSettings.dropPercentage / 100.0))
-                                            calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
-                                            calcRir = 0
+                                        "drop" -> {
+                                            if (algoSettings.dropEnabled && baselineWeight > 0.0) {
+                                                val targetRaw = baselineWeight * (1.0 - (algoSettings.dropPercentage / 100.0))
+                                                calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
+                                                calcRir = 0
+                                            }
                                         }
-                                    }
-                                    "back_off" -> {
-                                        if (algoSettings.backoffEnabled && baselineWeight > 0.0) {
-                                            val targetRaw = baselineWeight * (1.0 - (algoSettings.backoffPercentage / 100.0))
-                                            calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
-                                            calcRir = 1
+                                        "back_off" -> {
+                                            if (algoSettings.backoffEnabled && baselineWeight > 0.0) {
+                                                val targetRaw = baselineWeight * (1.0 - (algoSettings.backoffPercentage / 100.0))
+                                                calcWeight = PlateCalculator.findClosestAchievableWeight(targetRaw, userPlates)
+                                                calcRir = 1
+                                            }
                                         }
                                     }
                                 }
@@ -1180,7 +1203,9 @@ private fun ExerciseLogContent(
         val firstRowFallback = sets.firstOrNull()?.fallbackWeight?.toDoubleOrNull()
         if (firstRowFallback != null && firstRowFallback > 0.0) return firstRowFallback
 
-        val lastTrainingWeight = exercise.lastSets?.firstOrNull()?.weightKg
+        val lastTrainingWeight = exercise.lastSets
+            ?.firstOrNull { it.setType == "standard" }
+            ?.weightKg
         if (lastTrainingWeight != null && lastTrainingWeight > 0.0) return lastTrainingWeight
 
         return 0.0
@@ -1240,13 +1265,7 @@ private fun ExerciseLogContent(
         sets.forEachIndexed { rowIndex, row ->
             key(row.setNumber) {
                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val typeColor = when(row.setType) {
-                        "warmup" -> Color(0xFFFFC107)
-                        "failure" -> Color(0xFFEF4444)
-                        "back_off" -> Color(0xFF34D399)
-                        "drop" -> Color(0xFFA855F7)
-                        else -> AccentBlue
-                    }
+                    val typeColor = setTypeColor(row.setType)
                     val typeInteractionSource = remember { MutableInteractionSource() }
                     val isTypePressed by typeInteractionSource.collectIsPressedAsState()
 

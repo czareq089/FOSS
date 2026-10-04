@@ -10,14 +10,19 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -41,7 +46,9 @@ import com.foss.app.screens.TrainingScreen
 import com.foss.app.screens.WorkoutDetailScreen
 import com.foss.app.screens.WorkoutLoggingScreen
 import com.foss.app.ui.theme.FOSSTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,11 +73,51 @@ fun FossApp() {
     val currentRoute = backStackEntry?.destination?.route
     val topLevelRoutes = setOf(BottomNavItem.Dashboard.route, BottomNavItem.Training.route, BottomNavItem.Diet.route)
     val showBottomBar = currentRoute in topLevelRoutes
+    val activeWorkoutId = viewModel.currentWorkoutId()
+    val activeWorkoutRoutineName =
+        (viewModel.routinesState.value as? UiState.Success)?.data
+            ?.firstOrNull { it.id == viewModel.currentRoutineId() }?.name
+            ?: viewModel.activeWorkoutRoutineName.value
+            ?: "Active workout"
+    val activeWorkoutStartedAt = viewModel.activeWorkoutStartedAtMillis.value
+    val isWorkoutLoggingRoute = currentRoute == "workoutLogging/{workoutId}"
+    val scope = rememberCoroutineScope()
+
+    var footerElapsedSeconds by remember(activeWorkoutId) {
+        mutableLongStateOf(viewModel.activeWorkoutElapsedSeconds())
+    }
+    var showCancelActiveWorkoutDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(activeWorkoutId, activeWorkoutStartedAt) {
+        if (activeWorkoutId == null) {
+            footerElapsedSeconds = 0L
+            return@LaunchedEffect
+        }
+        while (true) {
+            footerElapsedSeconds = viewModel.activeWorkoutElapsedSeconds()
+            delay(1000L)
+        }
+    }
 
     Scaffold(
         bottomBar = {
-            if (showBottomBar) {
-                FossBottomNavBar(navController = navController, currentRoute = currentRoute)
+            Column {
+                if (activeWorkoutId != null && !isWorkoutLoggingRoute) {
+                    ActiveWorkoutBanner(
+                        routineName = activeWorkoutRoutineName,
+                        elapsedSeconds = footerElapsedSeconds,
+                        onClick = {
+                            navController.navigate("workoutLogging/$activeWorkoutId") {
+                                launchSingleTop = true
+                            }
+                        },
+                        onCancel = { showCancelActiveWorkoutDialog = true }
+                    )
+                }
+
+                if (showBottomBar) {
+                    FossBottomNavBar(navController = navController, currentRoute = currentRoute)
+                }
             }
         }
     ) { innerPadding ->
@@ -227,14 +274,22 @@ fun FossApp() {
                     onExerciseClick = { exerciseId ->
                         navController.navigate("exerciseDetail/$exerciseId")
                     },
+                    onLeaveWorkout = {
+                        navController.navigate(BottomNavItem.Training.route) {
+                            launchSingleTop = true
+                        }
+                    },
                     onFinish = {
+                        viewModel.resetWorkoutState()
                         navController.navigate(BottomNavItem.Training.route) {
                             popUpTo(BottomNavItem.Dashboard.route)
+                            launchSingleTop = true
                         }
                     },
                     onCancelWorkout = {
                         navController.navigate(BottomNavItem.Training.route) {
                             popUpTo(BottomNavItem.Dashboard.route)
+                            launchSingleTop = true
                         }
                     }
                 )
@@ -298,6 +353,127 @@ fun FossApp() {
                     onBack = { navController.popBackStack() }
                 )
             }
+        }
+    }
+
+
+    if (showCancelActiveWorkoutDialog && activeWorkoutId != null) {
+        AlertDialog(
+            onDismissRequest = { showCancelActiveWorkoutDialog = false },
+            title = {
+                Text(
+                    text = "Cancel workout?",
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Text(
+                    text = "Saved sets from this ongoing workout will be deleted.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val workoutIdToCancel = activeWorkoutId
+                        showCancelActiveWorkoutDialog = false
+                        scope.launch {
+                            viewModel.deleteWorkout(workoutIdToCancel)
+                        }
+                    }
+                ) {
+                    Text(
+                        text = "Cancel workout",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelActiveWorkoutDialog = false }) {
+                    Text(
+                        text = "Go back",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            shape = RoundedCornerShape(8.dp)
+        )
+    }
+}
+
+private fun formatWorkoutDuration(totalSeconds: Long): String {
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%02d:%02d", minutes, seconds)
+    }
+}
+
+@Composable
+private fun ActiveWorkoutBanner(
+    routineName: String,
+    elapsedSeconds: Long,
+    onClick: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Surface(
+        tonalElevation = 6.dp,
+        shadowElevation = 4.dp,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.FitnessCenter,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = routineName,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Elapsed: ${formatWorkoutDuration(elapsedSeconds)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            IconButton(
+                onClick = onCancel,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Cancel workout",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
+
+            Icon(
+                imageVector = Icons.Filled.KeyboardArrowUp,
+                contentDescription = "Return to workout",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

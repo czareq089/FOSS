@@ -57,7 +57,8 @@ data class LastSetValue(
     @SerializedName("set_number") val setNumber: Int,
     @SerializedName("weight_kg") val weightKg: Double,
     @SerializedName("reps") val reps: Int,
-    @SerializedName("rir") val rir: Int
+    @SerializedName("rir") val rir: Int,
+    @SerializedName("set_type") val setType: String = "standard"
 )
 
 data class WorkoutSummary(
@@ -119,7 +120,8 @@ data class WorkoutDetailSet(
     @SerializedName("set_number") val setNumber: Int,
     @SerializedName("weight_kg") val weightKg: Double,
     @SerializedName("reps") val reps: Int,
-    @SerializedName("rir") val rir: Int
+    @SerializedName("rir") val rir: Int,
+    @SerializedName("set_type") val setType: String = "standard"
 )
 
 data class WorkoutDetailExercise(

@@ -29,6 +29,7 @@ import com.foss.app.formatUtcToLocal
 import com.foss.app.models.WorkoutDetailExercise
 import com.foss.app.models.WorkoutDetailSet
 import com.foss.app.ui.theme.AccentBlue
+import com.foss.app.ui.theme.setTypeColor
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -36,7 +37,8 @@ class EditableDetailSetState(
     var setNumber: Int,
     initialWeight: Double,
     initialReps: Int,
-    initialRir: Int
+    initialRir: Int,
+    val setType: String = "standard"
 ) {
     var weight by mutableStateOf(if (initialWeight % 1.0 == 0.0) initialWeight.toInt().toString() else initialWeight.toString())
     var reps by mutableStateOf(initialReps.toString())
@@ -50,7 +52,7 @@ class EditableDetailExerciseState(
     initialSets: List<WorkoutDetailSet>
 ) {
     val sets = mutableStateListOf<EditableDetailSetState>().apply {
-        addAll(initialSets.map { EditableDetailSetState(it.setNumber, it.weightKg, it.reps, it.rir) })
+        addAll(initialSets.map { EditableDetailSetState(it.setNumber, it.weightKg, it.reps, it.rir, it.setType) })
     }
 }
 
@@ -130,7 +132,8 @@ fun WorkoutDetailScreen(
                                                             setNumber = sIndex + 1,
                                                             weightKg = s.weight.toDoubleOrNull() ?: 0.0,
                                                             reps = s.reps.toIntOrNull() ?: 0,
-                                                            rir = s.rir.toIntOrNull() ?: 0
+                                                            rir = s.rir.toIntOrNull() ?: 0,
+                                                            setType = s.setType
                                                         )
                                                     }
                                                 )
@@ -251,6 +254,7 @@ private fun WorkoutDetailEditableCard(
                 }
 
                 exercise.sets.forEachIndexed { sIndex, set ->
+                    val typeColor = setTypeColor(set.setType)
                     if (editMode) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -261,7 +265,7 @@ private fun WorkoutDetailEditableCard(
                                 modifier = Modifier.weight(0.6f),
                                 textAlign = TextAlign.Center,
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = if (set.setType == "standard") MaterialTheme.colorScheme.onSurface else typeColor
                             )
                             OutlinedTextField(
                                 value = set.weight,
@@ -310,7 +314,7 @@ private fun WorkoutDetailEditableCard(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("${sIndex + 1}", modifier = Modifier.weight(0.6f), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
+                            Text("${sIndex + 1}", modifier = Modifier.weight(0.6f), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium, color = typeColor)
                             Text(String.format(Locale.US, "%.1f kg", set.weight.toDoubleOrNull() ?: 0.0), modifier = Modifier.weight(1.2f), color = MaterialTheme.colorScheme.onSurface)
                             Text(set.reps, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
                             Text(set.rir, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)

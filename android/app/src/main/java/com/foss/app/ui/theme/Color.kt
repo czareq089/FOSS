@@ -11,3 +11,11 @@ val TextDim = Color(0xFF8B93A1)
 val AccentBlue = Color(0xFF4F8CFF)
 val ErrorRed = Color(0xFFEF4444)
 val SuccessGreen = Color(0xFF34D399)
+
+fun setTypeColor(setType: String): Color = when (setType) {
+    "warmup" -> Color(0xFFFFC107)
+    "failure" -> ErrorRed
+    "back_off" -> SuccessGreen
+    "drop" -> Color(0xFFA855F7)
+    else -> AccentBlue
+}
