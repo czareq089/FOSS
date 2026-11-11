@@ -125,9 +125,6 @@ class AppViewModel : ViewModel() {
     var dietProductsState = mutableStateOf<UiState<List<DietProduct>>>(UiState.Idle)
         private set
 
-    var dietAdaptationState = mutableStateOf<UiState<DietAdaptationReport>>(UiState.Idle)
-        private set
-
     var weightHistoryState = mutableStateOf<UiState<List<WeightHistoryPoint>>>(UiState.Idle)
         private set
 
@@ -368,6 +365,19 @@ class AppViewModel : ViewModel() {
             } else null
         } catch (e: Exception) {
             null
+        }
+    }
+
+    suspend fun updateExercise(id: Int, name: String, type: String, equipment: String): Boolean {
+        return try {
+            val response = api.updateExercise(UpdateExerciseReq(id, name, type, equipment))
+            if (response.isSuccessful) {
+                loadAllExercises()
+                loadExerciseAnalytics(id, "all")
+                true
+            } else false
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -632,20 +642,6 @@ class AppViewModel : ViewModel() {
                 } else UiState.Error("Failed to load products")
             } catch (e: Exception) {
                 dietSummaryState.value = UiState.Error(e.message ?: "Connection error")
-            }
-        }
-    }
-
-    fun loadDietAdaptation() {
-        viewModelScope.launch {
-            dietAdaptationState.value = UiState.Loading
-            try {
-                val res = api.getDietAdaptation(currentUserId)
-                dietAdaptationState.value = if (res.isSuccessful && res.body() != null) {
-                    UiState.Success(res.body()!!)
-                } else UiState.Error("Failed to load adaptation report")
-            } catch (e: Exception) {
-                dietAdaptationState.value = UiState.Error(e.message ?: "Connection error")
             }
         }
     }

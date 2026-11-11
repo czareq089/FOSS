@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.foss.app.AppViewModel
 import com.foss.app.UiState
+import com.foss.app.models.MacroTargets
 import com.foss.app.models.UserDietSettings
 import com.foss.app.models.WeightHistoryPoint
 import com.foss.app.ui.theme.AccentBlue
@@ -55,10 +57,17 @@ private val RANGES = listOf("1m" to "1M", "3m" to "3M", "6m" to "6M", "1y" to "1
 private val TargetColor = Color(0xFF34D399)
 
 private val GOALS = listOf(
-    "bulk" to "Semi Dirty Bulk",
+    "bulk" to "Bulk",
     "cut" to "Cut",
     "recomp" to "Recomp",
     "maintain" to "Maintain"
+)
+
+data class StrategyDraft(
+    val kcal: String = "",
+    val protein: String = "",
+    val fat: String = "",
+    val carbs: String = ""
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,10 +91,8 @@ fun DietSettingsScreen(
     var targetWeightInput by remember { mutableStateOf("78.0") }
     var selectedGoal by remember { mutableStateOf("bulk") }
 
-    var targetKcalDisplay by remember { mutableStateOf("2700") }
-    var targetProteinDisplay by remember { mutableStateOf("140") }
-    var targetFatDisplay by remember { mutableStateOf("75") }
-    var targetCarbsDisplay by remember { mutableStateOf("350") }
+    var isEditingStrategies by remember { mutableStateOf(false) }
+    val strategyDrafts = remember { mutableStateMapOf<String, StrategyDraft>() }
 
     LaunchedEffect(state) {
         if (state is UiState.Success) {
@@ -95,10 +102,39 @@ fun DietSettingsScreen(
             targetWeightInput = if (d.targetWeightKg % 1.0 == 0.0) d.targetWeightKg.toInt().toString() else d.targetWeightKg.toString()
             selectedGoal = if (d.goal.isNotEmpty()) d.goal else "bulk"
 
-            targetKcalDisplay = d.targetKcal.toInt().toString()
-            targetProteinDisplay = d.targetProtein.toInt().toString()
-            targetFatDisplay = d.targetFat.toInt().toString()
-            targetCarbsDisplay = d.targetCarbs.toInt().toString()
+            val targetsMap = d.strategyTargets ?: emptyMap()
+            GOALS.forEach { (key, _) ->
+                val custom = targetsMap[key]
+                if (custom != null && custom.kcal > 0) {
+                    strategyDrafts[key] = StrategyDraft(
+                        kcal = custom.kcal.toInt().toString(),
+                        protein = custom.protein.toInt().toString(),
+                        fat = custom.fat.toInt().toString(),
+                        carbs = custom.carbs.toInt().toString()
+                    )
+                } else if (key == selectedGoal && d.targetKcal > 0) {
+                    strategyDrafts[key] = StrategyDraft(
+                        kcal = d.targetKcal.toInt().toString(),
+                        protein = d.targetProtein.toInt().toString(),
+                        fat = d.targetFat.toInt().toString(),
+                        carbs = d.targetCarbs.toInt().toString()
+                    )
+                } else {
+                    val curW = d.currentWeightKg.coerceAtLeast(40.0)
+                    val (defKcal, defP, defF, defC) = when (key) {
+                        "bulk" -> listOf(2800.0, 1.9 * curW, 1.1 * curW, ((2800.0 - 1.9 * curW * 4 - 1.1 * curW * 9) / 4))
+                        "cut" -> listOf(2000.0, 2.3 * curW, 0.8 * curW, ((2000.0 - 2.3 * curW * 4 - 0.8 * curW * 9) / 4))
+                        "recomp" -> listOf(2300.0, 2.2 * curW, 0.9 * curW, ((2300.0 - 2.2 * curW * 4 - 0.9 * curW * 9) / 4))
+                        else -> listOf(2400.0, 1.8 * curW, 1.0 * curW, ((2400.0 - 1.8 * curW * 4 - 1.0 * curW * 9) / 4))
+                    }
+                    strategyDrafts[key] = StrategyDraft(
+                        kcal = defKcal.toInt().toString(),
+                        protein = defP.toInt().toString(),
+                        fat = defF.toInt().toString(),
+                        carbs = defC.toInt().coerceAtLeast(0).toString()
+                    )
+                }
+            }
         }
     }
 
@@ -185,12 +221,26 @@ fun DietSettingsScreen(
                             ) {
                                 scope.launch {
                                     isSaving = true
+                                    val customMap = strategyDrafts.mapValues { (_, draft) ->
+                                        MacroTargets(
+                                            kcal = draft.kcal.toDoubleOrNull() ?: 0.0,
+                                            protein = draft.protein.toDoubleOrNull() ?: 0.0,
+                                            fat = draft.fat.toDoubleOrNull() ?: 0.0,
+                                            carbs = draft.carbs.toDoubleOrNull() ?: 0.0
+                                        )
+                                    }
+                                    val activeDraft = strategyDrafts[selectedGoal]
                                     val payload = UserDietSettings(
+                                        userId = 1,
                                         heightCm = heightInput.toDoubleOrNull() ?: 174.0,
                                         currentWeightKg = currentWeightInput.toDoubleOrNull() ?: 70.0,
                                         targetWeightKg = targetWeightInput.toDoubleOrNull() ?: 78.0,
                                         goal = selectedGoal,
-                                        userId = 1
+                                        targetKcal = activeDraft?.kcal?.toDoubleOrNull() ?: 0.0,
+                                        targetProtein = activeDraft?.protein?.toDoubleOrNull() ?: 0.0,
+                                        targetFat = activeDraft?.fat?.toDoubleOrNull() ?: 0.0,
+                                        targetCarbs = activeDraft?.carbs?.toDoubleOrNull() ?: 0.0,
+                                        strategyTargets = customMap
                                     )
                                     val ok = viewModel.saveUserDietSettings(payload)
                                     isSaving = false
@@ -232,48 +282,111 @@ fun DietSettingsScreen(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // 1. Wybór celu (Goal)
+                        // 1. Wybór celu (Goal) i edycja makro per opcja
                         OutlinedCard(
                             shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
                         ) {
                             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text("Dietary Strategy", style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    text = "Choose your objective. The algorithm calculates your daily macro and calories automatically.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Dietary Strategy", style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            text = if (isEditingStrategies)
+                                                "Edit target calories and macros per option below."
+                                            else
+                                                "Choose your objective. Tap the pencil to customize targets.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clickable { isEditingStrategies = !isEditingStrategies },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Edit,
+                                            contentDescription = "Edit Strategy Targets",
+                                            tint = if (isEditingStrategies) AccentBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
 
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     GOALS.forEach { (key, label) ->
                                         val isSelected = selectedGoal == key
+                                        val draft = strategyDrafts[key] ?: StrategyDraft()
+
                                         OutlinedCard(
                                             onClick = { selectedGoal = key },
                                             shape = RoundedCornerShape(8.dp),
                                             border = BorderStroke(1.dp, if (isSelected) AccentBlue else MaterialTheme.colorScheme.outline),
                                             colors = CardDefaults.outlinedCardColors(
-                                                containerColor = if (isSelected) AccentBlue.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                                containerColor = if (isSelected) AccentBlue.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
                                             ),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            Row(
+                                            Column(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
+                                                    .padding(14.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
-                                                Column {
-                                                    Text(
-                                                        text = label,
-                                                        style = MaterialTheme.typography.titleSmall,
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                        color = if (isSelected) AccentBlue else MaterialTheme.colorScheme.onSurface
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = label,
+                                                            style = MaterialTheme.typography.titleSmall,
+                                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                            color = if (isSelected) AccentBlue else MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                        if (isSelected) {
+                                                            Surface(
+                                                                shape = RoundedCornerShape(4.dp),
+                                                                color = AccentBlue.copy(alpha = 0.15f)
+                                                            ) {
+                                                                Text(
+                                                                    text = "Active",
+                                                                    color = AccentBlue,
+                                                                    style = MaterialTheme.typography.labelSmall,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    RadioButton(
+                                                        selected = isSelected,
+                                                        onClick = { selectedGoal = key }
                                                     )
+                                                }
+
+                                                if (!isEditingStrategies) {
+                                                    if (draft.kcal.isNotEmpty()) {
+                                                        Text(
+                                                            text = "${draft.kcal} kcal • ${draft.protein}g P • ${draft.fat}g F • ${draft.carbs}g C",
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = if (isSelected) AccentBlue else MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                    }
                                                     val subtext = when (key) {
-                                                        "bulk" -> "Aggressive strength & size (+500 kcal, fat: 1.4g/kg)"
+                                                        "bulk" -> "Controlled surplus for strength & size gains"
                                                         "cut" -> "Fat loss with muscle retention (-400 kcal, high protein)"
                                                         "recomp" -> "Calorie cycling: surplus on workout days, deficit on rest"
                                                         else -> "Stable energy balance and weight maintenance"
@@ -283,11 +396,68 @@ fun DietSettingsScreen(
                                                         style = MaterialTheme.typography.bodySmall,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
+                                                } else {
+                                                    OutlinedTextField(
+                                                        value = draft.kcal,
+                                                        onValueChange = { newVal ->
+                                                            strategyDrafts[key] = draft.copy(kcal = newVal.filter { it.isDigit() })
+                                                        },
+                                                        label = { Text("Target Calories (kcal)") },
+                                                        singleLine = true,
+                                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    )
+
+                                                    Row(
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    ) {
+                                                        OutlinedTextField(
+                                                            value = draft.protein,
+                                                            onValueChange = { newVal ->
+                                                                strategyDrafts[key] = draft.copy(protein = newVal.filter { it.isDigit() })
+                                                            },
+                                                            label = { Text("Protein (g)") },
+                                                            singleLine = true,
+                                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                        OutlinedTextField(
+                                                            value = draft.fat,
+                                                            onValueChange = { newVal ->
+                                                                strategyDrafts[key] = draft.copy(fat = newVal.filter { it.isDigit() })
+                                                            },
+                                                            label = { Text("Fat (g)") },
+                                                            singleLine = true,
+                                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                        OutlinedTextField(
+                                                            value = draft.carbs,
+                                                            onValueChange = { newVal ->
+                                                                strategyDrafts[key] = draft.copy(carbs = newVal.filter { it.isDigit() })
+                                                            },
+                                                            label = { Text("Carbs (g)") },
+                                                            singleLine = true,
+                                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                    }
+
+                                                    val pVal = draft.protein.toIntOrNull() ?: 0
+                                                    val fVal = draft.fat.toIntOrNull() ?: 0
+                                                    val cVal = draft.carbs.toIntOrNull() ?: 0
+                                                    val macroKcal = pVal * 4 + fVal * 9 + cVal * 4
+                                                    Text(
+                                                        text = "Macros total: $macroKcal kcal",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
                                                 }
-                                                RadioButton(
-                                                    selected = isSelected,
-                                                    onClick = { selectedGoal = key }
-                                                )
                                             }
                                         }
                                     }
@@ -525,7 +695,13 @@ fun DietSettingsScreen(
                             }
                         }
 
-                        // 4. Podgląd wyliczonego automatycznie celu
+                        // 4. Podgląd celów aktywnej strategii
+                        val activeDraft = strategyDrafts[selectedGoal] ?: StrategyDraft()
+                        val activeKcal = activeDraft.kcal.ifEmpty { "0" }
+                        val activeP = activeDraft.protein.ifEmpty { "0" }
+                        val activeF = activeDraft.fat.ifEmpty { "0" }
+                        val activeC = activeDraft.carbs.ifEmpty { "0" }
+
                         OutlinedCard(
                             shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -537,13 +713,14 @@ fun DietSettingsScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Computed Daily Targets", style = MaterialTheme.typography.titleMedium)
+                                    Text("Active Daily Targets", style = MaterialTheme.typography.titleMedium)
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
                                         color = AccentBlue.copy(alpha = 0.15f)
                                     ) {
+                                        val goalLabel = GOALS.find { it.first == selectedGoal }?.second ?: selectedGoal.replaceFirstChar { it.uppercase() }
                                         Text(
-                                            text = "Auto Calculated",
+                                            text = goalLabel,
                                             color = AccentBlue,
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Bold,
@@ -553,7 +730,7 @@ fun DietSettingsScreen(
                                 }
 
                                 Text(
-                                    text = "Based on current weight (${currentWeightInput} kg), BMR, baseline activity, and workouts.",
+                                    text = "Target calories and macronutrients for your active dietary strategy ($selectedGoal).",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -575,19 +752,19 @@ fun DietSettingsScreen(
                                     ) {
                                         Column {
                                             Text("Calories", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text("$targetKcalDisplay kcal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = AccentBlue)
+                                            Text("$activeKcal kcal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = AccentBlue)
                                         }
                                         Column {
                                             Text("Carbs", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text("${targetCarbsDisplay}g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text("${activeC}g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                         }
                                         Column {
                                             Text("Fats", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text("${targetFatDisplay}g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text("${activeF}g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                         }
                                         Column {
                                             Text("Protein", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text("${targetProteinDisplay}g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text("${activeP}g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }

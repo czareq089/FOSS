@@ -48,6 +48,7 @@ func main() {
 	http.HandleFunc("/api/mobile/dashboard/volume", handleAPIMobileDashboardVolume)
 	http.HandleFunc("/api/exercises", handleAPIExercisesList)
 	http.HandleFunc("/api/exercises/create", handleAPIExerciseCreate)
+	http.HandleFunc("/api/exercises/update", handleAPIExerciseUpdate)
 	http.HandleFunc("/api/routines/exercises/add", handleAPIRoutineExerciseAdd)
 	http.HandleFunc("/api/routines/exercises/remove", handleAPIRoutineExerciseRemove)
 	http.HandleFunc("/api/routines/create", handleAPIRoutineCreate)
@@ -72,7 +73,6 @@ func main() {
 	http.HandleFunc("/api/user/daily-metrics/today", handleAPIGetDailyMetricsToday)
 	http.HandleFunc("/api/diet/log/custom", handleAPICustomDietLog)
 	http.HandleFunc("/api/diet/log/amount", handleAPIUpdateDietLogAmount)
-	http.HandleFunc("/api/diet/adaptation", handleAPIDietAdaptation)
 
 	// Uruchomienie serwera
 	port := ":8080"

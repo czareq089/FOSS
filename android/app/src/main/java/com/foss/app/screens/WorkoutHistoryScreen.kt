@@ -13,17 +13,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
 import com.foss.app.AppViewModel
 import com.foss.app.formatUtcToLocal
 import com.foss.app.models.WorkoutSummary
+import com.foss.app.ui.theme.AccentBlue
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 @Composable
 fun WorkoutHistoryScreen(
@@ -116,51 +120,148 @@ private fun WorkoutSummaryCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
         ) {
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(workout.routineName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text(
-                    text = formatUtcToLocal(workout.date),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Box {
-                val moreSource = remember { MutableInteractionSource() }
-                val isMorePressed by moreSource.collectIsPressedAsState()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = workout.routineName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = formatUtcToLocal(workout.date),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Box {
+                    val moreSource = remember { MutableInteractionSource() }
+                    val isMorePressed by moreSource.collectIsPressedAsState()
 
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .alpha(if (isMorePressed) 0.4f else 1f)
-                        .clickable(
-                            interactionSource = moreSource,
-                            indication = null
-                        ) { expanded = true },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .alpha(if (isMorePressed) 0.4f else 1f)
+                            .clickable(
+                                interactionSource = moreSource,
+                                indication = null
+                            ) { expanded = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(surface = MaterialTheme.colorScheme.surfaceVariant)) {
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit", color = MaterialTheme.colorScheme.onSurface) },
+                                onClick = { expanded = false; onEditClick() },
+                                leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                onClick = { expanded = false; onDeleteClick() },
+                                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            Spacer(Modifier.height(10.dp))
+
+            val weightFormatted = if (workout.totalWeightKg % 1.0 == 0.0) {
+                "${workout.totalWeightKg.toInt()} kg"
+            } else {
+                String.format(Locale.US, "%.1f kg", workout.totalWeightKg)
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Weight",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = weightFormatted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 }
 
-                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(surface = MaterialTheme.colorScheme.surfaceVariant)) {
-                    DropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                Column {
+                    Text(
+                        text = "Sets",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${workout.totalSets}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Column {
+                    Text(
+                        text = "Reps",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${workout.totalReps}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Column {
+                    Text(
+                        text = "PRs",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Edit", color = MaterialTheme.colorScheme.onSurface) },
-                            onClick = { expanded = false; onEditClick() },
-                            leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                            onClick = { expanded = false; onDeleteClick() },
-                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) }
+                        if (workout.prCount > 0) {
+                            Icon(
+                                imageVector = Icons.Filled.Stars,
+                                contentDescription = null,
+                                tint = AccentBlue,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                        Text(
+                            text = if (workout.prCount == 1) "1 PR" else "${workout.prCount} PRs",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (workout.prCount > 0) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (workout.prCount > 0) AccentBlue else MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }

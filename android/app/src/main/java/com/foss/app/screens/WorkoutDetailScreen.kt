@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,7 +39,8 @@ class EditableDetailSetState(
     initialWeight: Double,
     initialReps: Int,
     initialRir: Int,
-    val setType: String = "standard"
+    val setType: String = "standard",
+    val isPr: Boolean = false
 ) {
     var weight by mutableStateOf(if (initialWeight % 1.0 == 0.0) initialWeight.toInt().toString() else initialWeight.toString())
     var reps by mutableStateOf(initialReps.toString())
@@ -52,7 +54,7 @@ class EditableDetailExerciseState(
     initialSets: List<WorkoutDetailSet>
 ) {
     val sets = mutableStateListOf<EditableDetailSetState>().apply {
-        addAll(initialSets.map { EditableDetailSetState(it.setNumber, it.weightKg, it.reps, it.rir, it.setType) })
+        addAll(initialSets.map { EditableDetailSetState(it.setNumber, it.weightKg, it.reps, it.rir, it.setType, it.isPr) })
     }
 }
 
@@ -250,7 +252,7 @@ private fun WorkoutDetailEditableCard(
                     Text("Weight", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("RIR", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (editMode) Spacer(modifier = Modifier.weight(0.5f))
+                    Spacer(modifier = Modifier.weight(0.5f))
                 }
 
                 exercise.sets.forEachIndexed { sIndex, set ->
@@ -318,6 +320,16 @@ private fun WorkoutDetailEditableCard(
                             Text(String.format(Locale.US, "%.1f kg", set.weight.toDoubleOrNull() ?: 0.0), modifier = Modifier.weight(1.2f), color = MaterialTheme.colorScheme.onSurface)
                             Text(set.reps, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
                             Text(set.rir, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                            Box(modifier = Modifier.weight(0.5f), contentAlignment = Alignment.Center) {
+                                if (set.isPr) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Stars,
+                                        contentDescription = "PR Record",
+                                        tint = AccentBlue,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }

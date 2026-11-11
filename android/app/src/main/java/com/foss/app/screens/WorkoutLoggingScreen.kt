@@ -1416,25 +1416,33 @@ private fun ExerciseLogContent(
                                             val reps = row.reps.toIntOrNull() ?: 0
                                             val weight = row.weight.toDoubleOrNull() ?: 0.0
 
-                                            val current1RM = weight * (1.0 + (reps / 30.0))
-                                            val prevHistory1RM = exercise.lastSets?.maxOfOrNull { it.weightKg * (1.0 + (it.reps / 30.0)) } ?: 0.0
-                                            val currentWorkoutPrior1RM = sets.filter { it !== row && it.confirmed }.maxOfOrNull {
-                                                val w = it.weight.toDoubleOrNull() ?: 0.0
-                                                val r = it.reps.toIntOrNull() ?: 0
-                                                w * (1.0 + (r / 30.0))
-                                            } ?: 0.0
+                                            val prevMaxWeight = exercise.lastSets?.maxOfOrNull { it.weightKg } ?: 0.0
+                                            val prevMaxReps = exercise.lastSets?.maxOfOrNull { it.reps } ?: 0
+                                            val prevMaxVol = exercise.lastSets?.maxOfOrNull { it.weightKg * it.reps } ?: 0.0
 
-                                            val benchmark1RM = maxOf(prevHistory1RM, currentWorkoutPrior1RM)
-                                            val isNewPr = if (benchmark1RM > 0.0) {
-                                                current1RM > benchmark1RM
-                                            } else {
-                                                weight > 0.0 && reps > 0
-                                            }
+                                            val priorConfirmedSets = sets.filter { it !== row && it.confirmed }
+                                            val currentPriorMaxWeight = priorConfirmedSets.maxOfOrNull { it.weight.toDoubleOrNull() ?: 0.0 } ?: 0.0
+                                            val currentPriorMaxReps = priorConfirmedSets.maxOfOrNull { it.reps.toIntOrNull() ?: 0 } ?: 0
+                                            val currentPriorMaxVol = priorConfirmedSets.maxOfOrNull { (it.weight.toDoubleOrNull() ?: 0.0) * (it.reps.toIntOrNull() ?: 0) } ?: 0.0
 
-                                            if (isNewPr && weight > 0.0 && reps > 0) {
+                                            val benchWeight = maxOf(prevMaxWeight, currentPriorMaxWeight)
+                                            val benchReps = maxOf(prevMaxReps, currentPriorMaxReps)
+                                            val benchVol = maxOf(prevMaxVol, currentPriorMaxVol)
+
+                                            val hasPrior = (exercise.lastSets?.isNotEmpty() == true) || priorConfirmedSets.isNotEmpty()
+
+                                            val currentVol = weight * reps
+                                            val isWeightPr = weight > 0.0 && (!hasPrior || weight > benchWeight)
+                                            val isRepsPr = reps > 0 && (!hasPrior || reps > benchReps)
+                                            val isVolPr = currentVol > 0.0 && (!hasPrior || currentVol > benchVol)
+
+                                            val isNewPr = (isWeightPr || isRepsPr || isVolPr) && (weight > 0.0 || reps > 0)
+                                            val weightFormatted = if (weight % 1.0 == 0.0) weight.toInt().toString() else weight.toString()
+                                            val prLabel = if (weight > 0.0) "$weightFormatted kg × $reps" else "$reps reps"
+
+                                            if (isNewPr) {
                                                 row.isPr = true
-                                                val weightFormatted = if (weight % 1.0 == 0.0) weight.toInt().toString() else weight.toString()
-                                                onPrAchieved("${exercise.name}: $weightFormatted kg × $reps")
+                                                onPrAchieved("${exercise.name}: $prLabel")
                                             }
 
                                             row.error = null

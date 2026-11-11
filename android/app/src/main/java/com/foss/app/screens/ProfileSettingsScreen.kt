@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -38,6 +39,7 @@ fun ProfileSettingsScreen(
     onNavigateToAutomation: () -> Unit,
     onNavigateToDietSettings: () -> Unit,
     onNavigateToPreferences: () -> Unit,
+    onNavigateToExerciseExplorer: () -> Unit,
     onBack: () -> Unit
 ) {
     LaunchedEffect(Unit) {
@@ -180,6 +182,13 @@ fun ProfileSettingsScreen(
             }
 
             Spacer(Modifier.height(4.dp))
+
+            SettingsItemCard(
+                title = "Exercise Explorer",
+                subtitle = "Browse, search, add and edit exercises",
+                icon = Icons.Filled.Search,
+                onClick = onNavigateToExerciseExplorer
+            )
 
             SettingsItemCard(
                 title = "Preferences",

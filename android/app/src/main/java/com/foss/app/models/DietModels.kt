@@ -2,6 +2,13 @@ package com.foss.app.models
 
 import com.google.gson.annotations.SerializedName
 
+data class MacroTargets(
+    @SerializedName("kcal") val kcal: Double = 0.0,
+    @SerializedName("protein") val protein: Double = 0.0,
+    @SerializedName("fat") val fat: Double = 0.0,
+    @SerializedName("carbs") val carbs: Double = 0.0
+)
+
 data class UserDietSettings(
     @SerializedName("user_id") val userId: Int = 1,
     @SerializedName("height_cm") val heightCm: Double,
@@ -11,7 +18,8 @@ data class UserDietSettings(
     @SerializedName("target_kcal") val targetKcal: Double = 0.0,
     @SerializedName("target_protein") val targetProtein: Double = 0.0,
     @SerializedName("target_fat") val targetFat: Double = 0.0,
-    @SerializedName("target_carbs") val targetCarbs: Double = 0.0
+    @SerializedName("target_carbs") val targetCarbs: Double = 0.0,
+    @SerializedName("strategy_targets") val strategyTargets: Map<String, MacroTargets>? = null
 )
 
 data class DietProduct(
@@ -52,13 +60,6 @@ data class DailyDietSummary(
     @SerializedName("logs") val logs: List<DietLogEntry> = emptyList()
 )
 
-data class DietAdaptationReport(
-    @SerializedName("current_weight") val currentWeight: Double,
-    @SerializedName("weekly_change_kg") val weeklyChangeKg: Double,
-    @SerializedName("average_kcal_7d") val averageKcal7Days: Double,
-    @SerializedName("recommendation") val recommendation: String,
-    @SerializedName("delta_kcal_suggested") val deltaKcalSuggested: Double
-)
 
 data class LogDietRequest(
     @SerializedName("user_id") val userId: Int = 1,

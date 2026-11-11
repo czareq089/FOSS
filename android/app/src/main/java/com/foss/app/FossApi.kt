@@ -52,6 +52,9 @@ interface FossApi {
     @POST("/api/exercises/create")
     suspend fun createExercise(@Body request: CreateExerciseReq): Response<ExerciseItem>
 
+    @POST("/api/exercises/update")
+    suspend fun updateExercise(@Body request: UpdateExerciseReq): Response<ExerciseItem>
+
     @POST("/api/routines/exercises/add")
     suspend fun addExerciseToRoutine(@Body request: AddRoutineExerciseReq): Response<Unit>
 
@@ -139,9 +142,6 @@ interface FossApi {
 
     @DELETE("/api/diet/log/delete")
     suspend fun deleteDietLog(@Query("id") logId: Int): Response<Unit>
-
-    @GET("/api/diet/adaptation")
-    suspend fun getDietAdaptation(@Query("user_id") userId: Int = 1): Response<DietAdaptationReport>
 
     @GET("/api/user/weight/history")
     suspend fun getWeightHistory(@Query("user_id") userId: Int = 1): Response<List<WeightHistoryPoint>>

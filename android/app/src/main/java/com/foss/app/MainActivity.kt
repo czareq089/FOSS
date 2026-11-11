@@ -228,6 +228,17 @@ fun FossApp() {
                 )
             }
 
+            composable("exerciseExplorer") {
+                ExerciseSelectionScreen(
+                    viewModel = viewModel,
+                    isExplorerMode = true,
+                    onExerciseSelected = { exerciseId ->
+                        navController.navigate("exerciseDetail/$exerciseId")
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
             composable(
                 route = "exerciseSelection/{type}/{id}",
                 arguments = listOf(
@@ -321,6 +332,9 @@ fun FossApp() {
                     },
                     onNavigateToDietSettings = {
                         navController.navigate("dietSettings")
+                    },
+                    onNavigateToExerciseExplorer = {
+                        navController.navigate("exerciseExplorer")
                     },
                     onBack = { navController.popBackStack() }
                 )

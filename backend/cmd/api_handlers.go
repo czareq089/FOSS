@@ -34,6 +34,7 @@ type ExerciseInfo struct {
 	WorkoutExerciseID int            `json:"workout_exercise_id"`
 	ExerciseID        int            `json:"exercise_id"`
 	Name              string         `json:"name"`
+	Type              string         `json:"type"`
 	Position          int            `json:"position"`
 	TemplateSets      []RoutineSet   `json:"template_sets"`
 	LastSets          []LastSetValue `json:"last_sets"`
@@ -51,9 +52,13 @@ type StartWorkoutResponse struct {
 }
 
 type WorkoutSummary struct {
-	WorkoutID   int    `json:"workout_id"`
-	Date        string `json:"date"`
-	RoutineName string `json:"routine_name"`
+	WorkoutID     int     `json:"workout_id"`
+	Date          string  `json:"date"`
+	RoutineName   string  `json:"routine_name"`
+	TotalSets     int     `json:"total_sets"`
+	TotalReps     int     `json:"total_reps"`
+	TotalWeightKg float64 `json:"total_weight_kg"`
+	PrCount       int     `json:"pr_count"`
 }
 
 type LastSetValue struct {
@@ -110,6 +115,13 @@ type CreateExerciseReq struct {
 	Equipment string `json:"equipment"`
 }
 
+type UpdateExerciseReq struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Equipment string `json:"equipment"`
+}
+
 type AddRoutineExerciseReq struct {
 	RoutineID  int `json:"routine_id"`
 	ExerciseID int `json:"exercise_id"`
@@ -132,6 +144,7 @@ type WorkoutDetailSet struct {
 	Reps      int     `json:"reps"`
 	Rir       int     `json:"rir"`
 	SetType   string  `json:"set_type"`
+	IsPr      bool    `json:"is_pr"`
 }
 
 type WorkoutDetailExercise struct {
@@ -231,16 +244,24 @@ type ConsistencyStatsResponse struct {
 // MODUŁ DIETY (STRUKTURY I HANDLERY JSON)
 // ==========================================
 
+type MacroTargets struct {
+	Kcal    float64 `json:"kcal"`
+	Protein float64 `json:"protein"`
+	Fat     float64 `json:"fat"`
+	Carbs   float64 `json:"carbs"`
+}
+
 type UserDietSettingsModel struct {
-	UserID          int     `json:"user_id"`
-	HeightCm        float64 `json:"height_cm"`
-	CurrentWeightKg float64 `json:"current_weight_kg"`
-	TargetWeightKg  float64 `json:"target_weight_kg"`
-	Goal            string  `json:"goal"`
-	TargetKcal      float64 `json:"target_kcal"`
-	TargetProtein   float64 `json:"target_protein"`
-	TargetFat       float64 `json:"target_fat"`
-	TargetCarbs     float64 `json:"target_carbs"`
+	UserID          int                     `json:"user_id"`
+	HeightCm        float64                 `json:"height_cm"`
+	CurrentWeightKg float64                 `json:"current_weight_kg"`
+	TargetWeightKg  float64                 `json:"target_weight_kg"`
+	Goal            string                  `json:"goal"`
+	TargetKcal      float64                 `json:"target_kcal"`
+	TargetProtein   float64                 `json:"target_protein"`
+	TargetFat       float64                 `json:"target_fat"`
+	TargetCarbs     float64                 `json:"target_carbs"`
+	StrategyTargets map[string]MacroTargets `json:"strategy_targets"`
 }
 
 type DietProductItem struct {
@@ -315,19 +336,45 @@ type DailyDietSummaryResp struct {
 	Logs         []DietLogItem `json:"logs"`
 }
 
-type DietAdaptationReport struct {
-	CurrentWeight      float64 `json:"current_weight"`
-	WeeklyChangeKg     float64 `json:"weekly_change_kg"`
-	AverageKcal7Days   float64 `json:"average_kcal_7d"`
-	Recommendation     string  `json:"recommendation"`
-	DeltaKcalSuggested float64 `json:"delta_kcal_suggested"`
+// ==========================================
+// CELE KALORYCZNE I STRATEGIE ŻYWIENIOWE
+// ==========================================
+
+func computeDefaultStrategyTargets(tdeeBase, currentWeight float64, hadWorkout bool) map[string]MacroTargets {
+	bulkKcal := tdeeBase + 500.0
+	bulkP := 1.9 * currentWeight
+	bulkF := 1.1 * currentWeight
+	bulkC := math.Max(0, (bulkKcal-(bulkP*4.0+bulkF*9.0))/4.0)
+
+	cutKcal := math.Max(1400.0, tdeeBase-400.0)
+	cutP := 2.3 * currentWeight
+	cutF := 0.8 * currentWeight
+	cutC := math.Max(0, (cutKcal-(cutP*4.0+cutF*9.0))/4.0)
+
+	var recompKcal float64
+	if hadWorkout {
+		recompKcal = tdeeBase + 200.0
+	} else {
+		recompKcal = math.Max(1500.0, tdeeBase-200.0)
+	}
+	recompP := 2.2 * currentWeight
+	recompF := 0.9 * currentWeight
+	recompC := math.Max(0, (recompKcal-(recompP*4.0+recompF*9.0))/4.0)
+
+	maintainKcal := tdeeBase
+	maintainP := 1.8 * currentWeight
+	maintainF := 1.0 * currentWeight
+	maintainC := math.Max(0, (maintainKcal-(maintainP*4.0+maintainF*9.0))/4.0)
+
+	return map[string]MacroTargets{
+		"bulk":     {Kcal: math.Round(bulkKcal), Protein: math.Round(bulkP), Fat: math.Round(bulkF), Carbs: math.Round(bulkC)},
+		"cut":      {Kcal: math.Round(cutKcal), Protein: math.Round(cutP), Fat: math.Round(cutF), Carbs: math.Round(cutC)},
+		"recomp":   {Kcal: math.Round(recompKcal), Protein: math.Round(recompP), Fat: math.Round(recompF), Carbs: math.Round(recompC)},
+		"maintain": {Kcal: math.Round(maintainKcal), Protein: math.Round(maintainP), Fat: math.Round(maintainF), Carbs: math.Round(maintainC)},
+	}
 }
 
-// ==========================================
-// SILNIK ALGORYTMÓW METABOLICZNYCH
-// ==========================================
-
-func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, protein, fat, carbs float64, currentWeight float64, height float64, goal string, targetWeight float64) {
+func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, protein, fat, carbs float64, currentWeight float64, height float64, goal string, targetWeight float64, allStrategies map[string]MacroTargets) {
 	height = 174.0
 	targetWeight = 78.0
 	goal = "bulk"
@@ -335,10 +382,15 @@ func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, p
 	deficitKcal := 400.0
 	workoutBonusKcal := 350.0
 
+	var rawStrategyTargets sql.NullString
+	var manualKcal, manualProtein, manualFat, manualCarbs sql.NullFloat64
+
 	_ = db.QueryRow(`
-       SELECT height_cm, target_weight_kg, COALESCE(goal, 'bulk'), surplus_kcal, deficit_kcal, workout_bonus_kcal
+       SELECT height_cm, target_weight_kg, COALESCE(goal, 'bulk'), surplus_kcal, deficit_kcal, workout_bonus_kcal,
+              strategy_targets, target_kcal, target_protein, target_fat, target_carbs
        FROM user_diet_settings WHERE user_id = ?`, userID).
-		Scan(&height, &targetWeight, &goal, &surplusKcal, &deficitKcal, &workoutBonusKcal)
+		Scan(&height, &targetWeight, &goal, &surplusKcal, &deficitKcal, &workoutBonusKcal,
+			&rawStrategyTargets, &manualKcal, &manualProtein, &manualFat, &manualCarbs)
 
 	// Ostatnia znana waga użytkownika
 	_ = db.QueryRow(`
@@ -364,10 +416,9 @@ func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, p
 	// Wzór Mifflina-St Jeora (BMR)
 	bmr := (10.0 * currentWeight) + (6.25 * height) - (5.0 * age) + 5.0
 
-	// Bazowe utrzymanie: sedentary (BMR * 1.2) + stały NEAT z 5000 kroków (~200 kcal)
+	// Bazowe utrzymanie: sedentary (BMR * 1.2) + stały NEAT (~200 kcal)
 	sedentaryBase := (bmr * 1.2) + 200.0
 
-	// Czy odbył się trening danego dnia
 	targetDateQuery := dateStr
 	if targetDateQuery == "now" {
 		targetDateQuery = time.Now().Format("2006-01-02")
@@ -383,73 +434,49 @@ func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, p
 		eat = workoutBonusKcal
 	}
 
-	// Feedback loop: adaptacja do tempa zmian wagi (średnia 7d vs 14d)
-	var avgWeight7d, avgWeight14d sql.NullFloat64
-	_ = db.QueryRow(`
-       SELECT AVG(weight_kg) FROM user_daily_metrics 
-       WHERE user_id = ? AND date >= date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgWeight7d)
-	_ = db.QueryRow(`
-       SELECT AVG(weight_kg) FROM user_daily_metrics 
-       WHERE user_id = ? AND date >= date('now', '-14 days') AND date < date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgWeight14d)
+	tdeeBase := sedentaryBase + eat
 
-	feedbackKcalAdjustment := 0.0
-	if avgWeight7d.Valid && avgWeight14d.Valid && avgWeight14d.Float64 > 0 {
-		deltaW := avgWeight7d.Float64 - avgWeight14d.Float64 // tempo kg na tydzień
-		if goal == "bulk" {
-			if deltaW < 0.25 {
-				feedbackKcalAdjustment = 150.0 // waga rośnie za wolno na semi dirty bulk -> podbijamy
-			} else if deltaW > 0.80 {
-				feedbackKcalAdjustment = -150.0 // za szybkie zalewanie -> korygujemy w dół
-			}
-		} else if goal == "cut" {
-			if deltaW > -0.15 {
-				feedbackKcalAdjustment = -150.0 // zastój na redukcji
-			} else if deltaW < -0.80 {
-				feedbackKcalAdjustment = 100.0 // za ostry spadek wagi
+	allStrategies = computeDefaultStrategyTargets(tdeeBase, currentWeight, hadWorkout > 0)
+
+	// Nałożenie ręcznie skonfigurowanych celów strategii jeśli istnieją w DB
+	if rawStrategyTargets.Valid && strings.TrimSpace(rawStrategyTargets.String) != "" {
+		var custom map[string]MacroTargets
+		if err := json.Unmarshal([]byte(rawStrategyTargets.String), &custom); err == nil {
+			for k, v := range custom {
+				if v.Kcal > 0 {
+					allStrategies[k] = v
+				}
 			}
 		}
 	}
 
-	tdeeBase := sedentaryBase + eat + feedbackKcalAdjustment
-
-	var pPerKg, fPerKg float64
-	switch strings.ToLower(goal) {
-	case "bulk":
-		// Semi Dirty Bulk: maksymalizacja siły i szybki przyrost masy, wyższy pułap tłuszczu pod gęste kalorie
-		kcal = tdeeBase + surplusKcal
-		pPerKg = 1.9
-		fPerKg = 1.4
-	case "cut":
-		kcal = math.Max(1400.0, tdeeBase-deficitKcal)
-		pPerKg = 2.3
-		fPerKg = 0.8
-	case "recomp":
-		if hadWorkout > 0 {
-			kcal = tdeeBase + 200.0
-		} else {
-			kcal = math.Max(1500.0, tdeeBase-200.0)
-		}
-		pPerKg = 2.2
-		fPerKg = 0.9
-	case "maintain":
-		fallthrough
-	default:
-		kcal = tdeeBase
-		pPerKg = 1.8
-		fPerKg = 1.0
+	goalKey := strings.ToLower(goal)
+	if goalKey == "" {
+		goalKey = "bulk"
 	}
 
-	protein = pPerKg * currentWeight
-	fat = fPerKg * currentWeight
-
-	remainingCalories := kcal - (protein*4.0 + fat*9.0)
-	if remainingCalories > 0 {
-		carbs = remainingCalories / 4.0
-	} else {
-		carbs = 0.0
+	activeTargets, ok := allStrategies[goalKey]
+	if !ok {
+		activeTargets = allStrategies["bulk"]
+		goalKey = "bulk"
 	}
 
-	return kcal, protein, fat, carbs, currentWeight, height, goal, targetWeight
+	// Zgodność wsteczna z manualnymi polami
+	if manualKcal.Valid && manualKcal.Float64 > 0 {
+		activeTargets.Kcal = manualKcal.Float64
+	}
+	if manualProtein.Valid && manualProtein.Float64 > 0 {
+		activeTargets.Protein = manualProtein.Float64
+	}
+	if manualFat.Valid && manualFat.Float64 > 0 {
+		activeTargets.Fat = manualFat.Float64
+	}
+	if manualCarbs.Valid && manualCarbs.Float64 > 0 {
+		activeTargets.Carbs = manualCarbs.Float64
+	}
+	allStrategies[goalKey] = activeTargets
+
+	return activeTargets.Kcal, activeTargets.Protein, activeTargets.Fat, activeTargets.Carbs, currentWeight, height, goal, targetWeight, allStrategies
 }
 
 // ==========================================
@@ -773,11 +800,103 @@ func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
 		if userID == "" {
 			userID = "1"
 		}
+
+		// 1. Calculate PR counts per workout
+		prCountMap := make(map[int]int)
+
+		type exBench struct {
+			hasPrior     bool
+			maxWeight    float64
+			maxReps      int
+			maxSetVolume float64
+		}
+		benchmarks := make(map[int]*exBench)
+
+		prRows, err := db.Query(`
+			SELECT 
+				w.id,
+				we.exercise_id,
+				COALESCE(s.weight_kg, 0),
+				COALESCE(s.reps, 0)
+			FROM training_workouts w
+			JOIN training_workout_exercises we ON we.workout_id = w.id
+			JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+			WHERE w.user_id = ?
+			ORDER BY w.date ASC, w.id ASC, s.set_number ASC`, userID)
+		if err == nil {
+			for prRows.Next() {
+				var (
+					wID    int
+					exID   int
+					weight float64
+					reps   int
+				)
+				if errScan := prRows.Scan(&wID, &exID, &weight, &reps); errScan == nil {
+					b, exists := benchmarks[exID]
+					if !exists {
+						b = &exBench{}
+						benchmarks[exID] = b
+					}
+
+					vol := weight * float64(reps)
+					isPr := false
+
+					if !b.hasPrior {
+						if weight > 0 || reps > 0 {
+							isPr = true
+							b.hasPrior = true
+							if weight > b.maxWeight {
+								b.maxWeight = weight
+							}
+							if reps > b.maxReps {
+								b.maxReps = reps
+							}
+							if vol > b.maxSetVolume {
+								b.maxSetVolume = vol
+							}
+						}
+					} else {
+						weightPr := weight > 0 && weight > b.maxWeight
+						repsPr := reps > 0 && reps > b.maxReps
+						volPr := vol > 0 && vol > b.maxSetVolume
+
+						if weightPr || repsPr || volPr {
+							isPr = true
+							if weight > b.maxWeight {
+								b.maxWeight = weight
+							}
+							if reps > b.maxReps {
+								b.maxReps = reps
+							}
+							if vol > b.maxSetVolume {
+								b.maxSetVolume = vol
+							}
+						}
+					}
+
+					if isPr {
+						prCountMap[wID]++
+					}
+				}
+			}
+			prRows.Close()
+		}
+
+		// 2. Query workouts with aggregated sets, reps and volume
 		rows, err := db.Query(`
-          SELECT w.id, w.date, COALESCE(r.name, 'Custom workout')
+          SELECT 
+            w.id, 
+            w.date, 
+            COALESCE(r.name, 'Custom workout'),
+            COUNT(s.id) AS total_sets,
+            COALESCE(SUM(s.reps), 0) AS total_reps,
+            COALESCE(SUM(s.weight_kg * s.reps), 0) AS total_weight_kg
           FROM training_workouts w
           LEFT JOIN training_routines r ON r.id = w.routine_id
+          LEFT JOIN training_workout_exercises we ON we.workout_id = w.id
+          LEFT JOIN training_workout_sets s ON s.workout_exercise_id = we.id
           WHERE w.user_id = ?
+          GROUP BY w.id
           ORDER BY w.date DESC`, userID)
 		if err != nil {
 			http.Error(w, "Failed to fetch workouts", http.StatusInternalServerError)
@@ -788,9 +907,10 @@ func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
 		workouts := []WorkoutSummary{}
 		for rows.Next() {
 			var ws WorkoutSummary
-			if err := rows.Scan(&ws.WorkoutID, &ws.Date, &ws.RoutineName); err != nil {
+			if err := rows.Scan(&ws.WorkoutID, &ws.Date, &ws.RoutineName, &ws.TotalSets, &ws.TotalReps, &ws.TotalWeightKg); err != nil {
 				continue
 			}
+			ws.PrCount = prCountMap[ws.WorkoutID]
 			workouts = append(workouts, ws)
 		}
 
@@ -949,7 +1069,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	workoutID, _ := res.LastInsertId()
 
 	rows, err := db.Query(`
-    SELECT re.id, re.exercise_id, e.name, re.position
+    SELECT re.id, re.exercise_id, e.name, COALESCE(e.type, 'Weight & Reps'), re.position
     FROM training_routine_exercises re
     JOIN training_exercises e ON e.id = re.exercise_id
     WHERE re.routine_id = ?
@@ -963,12 +1083,13 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 		id         int
 		exerciseID int
 		name       string
+		exType     string
 		position   int
 	}
 	var routineExercises []routineExercise
 	for rows.Next() {
 		var re routineExercise
-		if err := rows.Scan(&re.id, &re.exerciseID, &re.name, &re.position); err != nil {
+		if err := rows.Scan(&re.id, &re.exerciseID, &re.name, &re.exType, &re.position); err != nil {
 			continue
 		}
 		routineExercises = append(routineExercises, re)
@@ -1001,6 +1122,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 			WorkoutExerciseID: int(weID),
 			ExerciseID:        re.exerciseID,
 			Name:              re.name,
+			Type:              re.exType,
 			Position:          re.position,
 			TemplateSets:      tSets,
 			LastSets:          lSets,
@@ -1087,6 +1209,46 @@ func handleAPIExerciseCreate(w http.ResponseWriter, r *http.Request) {
 		Name:      req.Name,
 		Type:      req.Type,
 		Equipment: req.Equipment,
+	})
+}
+
+func handleAPIExerciseUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req UpdateExerciseReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID <= 0 || strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "Exercise ID and Name cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`UPDATE training_exercises SET name = ?, type = ?, equipment = ? WHERE id = ?`,
+		strings.TrimSpace(req.Name), strings.TrimSpace(req.Type), strings.TrimSpace(req.Equipment), req.ID)
+	if err != nil {
+		http.Error(w, "Failed to update exercise: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ExerciseItem{
+		ID:        req.ID,
+		Name:      strings.TrimSpace(req.Name),
+		Type:      strings.TrimSpace(req.Type),
+		Equipment: strings.TrimSpace(req.Equipment),
 	})
 }
 
@@ -1227,13 +1389,14 @@ func handleAPIWorkoutExerciseAdd(w http.ResponseWriter, r *http.Request) {
 
 	weID, _ := res.LastInsertId()
 
-	var exName string
-	_ = db.QueryRow(`SELECT name FROM training_exercises WHERE id = ?`, req.ExerciseID).Scan(&exName)
+	var exName, exType string
+	_ = db.QueryRow(`SELECT name, COALESCE(type, 'Weight & Reps') FROM training_exercises WHERE id = ?`, req.ExerciseID).Scan(&exName, &exType)
 
 	newExercise := ExerciseInfo{
 		WorkoutExerciseID: int(weID),
 		ExerciseID:        req.ExerciseID,
 		Name:              exName,
+		Type:              exType,
 		Position:          maxPos + 1,
 	}
 
@@ -1262,13 +1425,102 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 
 	var resp WorkoutDetailResponse
 
+	var (
+		userID      string
+		workoutDate string
+	)
+
 	err = db.QueryRow(`
-       SELECT id, date, COALESCE((SELECT name FROM training_routines WHERE id = routine_id), 'Custom workout') 
-       FROM training_workouts WHERE id = ?`, workoutID).Scan(&resp.WorkoutID, &resp.Date, &resp.RoutineName)
+       SELECT id, user_id, date, COALESCE((SELECT name FROM training_routines WHERE id = routine_id), 'Custom workout') 
+       FROM training_workouts WHERE id = ?`, workoutID).Scan(&resp.WorkoutID, &userID, &workoutDate, &resp.RoutineName)
 
 	if err != nil {
 		http.Error(w, "Workout not found", http.StatusNotFound)
 		return
+	}
+	resp.Date = workoutDate
+
+	// Pre-calculate PR sets up to and including this workout
+	prSetIDs := make(map[int]bool)
+	type exBench struct {
+		hasPrior     bool
+		maxWeight    float64
+		maxReps      int
+		maxSetVolume float64
+	}
+	benchmarks := make(map[int]*exBench)
+
+	prRows, errPr := db.Query(`
+		SELECT 
+			s.id,
+			w.id,
+			we.exercise_id,
+			COALESCE(s.weight_kg, 0),
+			COALESCE(s.reps, 0)
+		FROM training_workouts w
+		JOIN training_workout_exercises we ON we.workout_id = w.id
+		JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+		WHERE w.user_id = ?
+		  AND (w.date < ? OR (w.date = ? AND w.id <= ?))
+		ORDER BY w.date ASC, w.id ASC, s.set_number ASC`, userID, workoutDate, workoutDate, resp.WorkoutID)
+	if errPr == nil {
+		for prRows.Next() {
+			var (
+				sID    int
+				wID    int
+				exID   int
+				weight float64
+				reps   int
+			)
+			if errScan := prRows.Scan(&sID, &wID, &exID, &weight, &reps); errScan == nil {
+				b, exists := benchmarks[exID]
+				if !exists {
+					b = &exBench{}
+					benchmarks[exID] = b
+				}
+
+				vol := weight * float64(reps)
+				isPr := false
+
+				if !b.hasPrior {
+					if weight > 0 || reps > 0 {
+						isPr = true
+						b.hasPrior = true
+						if weight > b.maxWeight {
+							b.maxWeight = weight
+						}
+						if reps > b.maxReps {
+							b.maxReps = reps
+						}
+						if vol > b.maxSetVolume {
+							b.maxSetVolume = vol
+						}
+					}
+				} else {
+					weightPr := weight > 0 && weight > b.maxWeight
+					repsPr := reps > 0 && reps > b.maxReps
+					volPr := vol > 0 && vol > b.maxSetVolume
+
+					if weightPr || repsPr || volPr {
+						isPr = true
+						if weight > b.maxWeight {
+							b.maxWeight = weight
+						}
+						if reps > b.maxReps {
+							b.maxReps = reps
+						}
+						if vol > b.maxSetVolume {
+							b.maxSetVolume = vol
+						}
+					}
+				}
+
+				if isPr && wID == resp.WorkoutID {
+					prSetIDs[sID] = true
+				}
+			}
+		}
+		prRows.Close()
 	}
 
 	resp.Exercises = []WorkoutDetailExercise{}
@@ -1293,6 +1545,7 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 				for setRows.Next() {
 					var s WorkoutDetailSet
 					setRows.Scan(&s.SetID, &s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir, &s.SetType)
+					s.IsPr = prSetIDs[s.SetID]
 					ex.Sets = append(ex.Sets, s)
 				}
 				setRows.Close()
@@ -1880,13 +2133,20 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
+	// Upewnij się, że kolumny istnieją
+	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN strategy_targets TEXT`)
+	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN target_kcal REAL`)
+	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN target_protein REAL`)
+	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN target_fat REAL`)
+	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN target_carbs REAL`)
+
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
 		userID = "1"
 	}
 
 	if r.Method == http.MethodGet {
-		kcal, p, f, c, curWeight, height, goal, targetWeight := calculateDynamicTargets(db, userID, "now")
+		kcal, p, f, c, curWeight, height, goal, targetWeight, allStrategies := calculateDynamicTargets(db, userID, "now")
 
 		resp := UserDietSettingsModel{
 			UserID:          1,
@@ -1898,6 +2158,7 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 			TargetProtein:   p,
 			TargetFat:       f,
 			TargetCarbs:     c,
+			StrategyTargets: allStrategies,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -1933,15 +2194,51 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 				req.UserID, req.CurrentWeightKg)
 		}
 
+		// Ustal cele dla wybranego celu z StrategyTargets jeśli podane
+		if req.StrategyTargets != nil {
+			if st, ok := req.StrategyTargets[req.Goal]; ok && st.Kcal > 0 {
+				req.TargetKcal = st.Kcal
+				req.TargetProtein = st.Protein
+				req.TargetFat = st.Fat
+				req.TargetCarbs = st.Carbs
+			}
+		}
+
+		var strategyTargetsJSON interface{}
+		if req.StrategyTargets != nil && len(req.StrategyTargets) > 0 {
+			if bytes, err := json.Marshal(req.StrategyTargets); err == nil {
+				strategyTargetsJSON = string(bytes)
+			}
+		}
+
+		var tKcal, tProtein, tFat, tCarbs interface{}
+		if req.TargetKcal > 0 {
+			tKcal = req.TargetKcal
+		}
+		if req.TargetProtein > 0 {
+			tProtein = req.TargetProtein
+		}
+		if req.TargetFat > 0 {
+			tFat = req.TargetFat
+		}
+		if req.TargetCarbs > 0 {
+			tCarbs = req.TargetCarbs
+		}
+
 		_, err = tx.Exec(`
-          INSERT INTO user_diet_settings (user_id, height_cm, target_weight_kg, goal, updated_at)
-          VALUES (?, ?, ?, ?, datetime('now'))
+          INSERT INTO user_diet_settings (user_id, height_cm, target_weight_kg, goal, target_kcal, target_protein, target_fat, target_carbs, strategy_targets, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
           ON CONFLICT(user_id) DO UPDATE SET
              height_cm = excluded.height_cm,
              target_weight_kg = excluded.target_weight_kg,
              goal = excluded.goal,
+             target_kcal = excluded.target_kcal,
+             target_protein = excluded.target_protein,
+             target_fat = excluded.target_fat,
+             target_carbs = excluded.target_carbs,
+             strategy_targets = excluded.strategy_targets,
              updated_at = datetime('now')`,
-			req.UserID, req.HeightCm, req.TargetWeightKg, req.Goal)
+			req.UserID, req.HeightCm, req.TargetWeightKg, req.Goal, tKcal, tProtein, tFat, tCarbs, strategyTargetsJSON)
 
 		if err != nil {
 			tx.Rollback()
@@ -2064,7 +2361,7 @@ func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	targetKcal, targetP, targetF, targetC, _, _, _, _ := calculateDynamicTargets(db, userID, dateStr)
+	targetKcal, targetP, targetF, targetC, _, _, _, _, _ := calculateDynamicTargets(db, userID, dateStr)
 
 	var resp DailyDietSummaryResp
 	resp.TargetKcal = targetKcal
@@ -2123,101 +2420,6 @@ func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
-}
-
-func handleAPIDietAdaptation(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		userID = "1"
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
-		return
-	}
-	defer db.Close()
-
-	var curWeight float64
-	_ = db.QueryRow(`
-       SELECT weight_kg FROM user_daily_metrics 
-       WHERE user_id = ? AND weight_kg > 0 
-       ORDER BY date DESC, id DESC LIMIT 1`, userID).Scan(&curWeight)
-
-	var goal string = "bulk"
-	_ = db.QueryRow(`SELECT COALESCE(goal, 'bulk') FROM user_diet_settings WHERE user_id = ?`, userID).Scan(&goal)
-
-	var avgW7d, avgW14d sql.NullFloat64
-	_ = db.QueryRow(`
-       SELECT AVG(weight_kg) FROM user_daily_metrics 
-       WHERE user_id = ? AND date >= date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgW7d)
-	_ = db.QueryRow(`
-       SELECT AVG(weight_kg) FROM user_daily_metrics 
-       WHERE user_id = ? AND date >= date('now', '-14 days') AND date < date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgW14d)
-
-	var avgKcal7d sql.NullFloat64
-	_ = db.QueryRow(`
-       SELECT AVG(day_kcal) FROM (
-          SELECT SUM(
-             CASE 
-                WHEN l.product_id IS NOT NULL THEN COALESCE(p.kcal, 0) * (l.amount / 100.0)
-                ELSE COALESCE(l.kcal, 0) * (l.amount / 100.0)
-             END
-          ) as day_kcal
-          FROM diet_logs l
-          LEFT JOIN diet_products p ON p.id = l.product_id
-          WHERE l.user_id = ? AND date(l.logged_at) >= date('now', '-7 days')
-          GROUP BY date(l.logged_at)
-       )`, userID).Scan(&avgKcal7d)
-
-	report := DietAdaptationReport{
-		CurrentWeight:    curWeight,
-		WeeklyChangeKg:   0.0,
-		AverageKcal7Days: avgKcal7d.Float64,
-		Recommendation:   "Maintaining consistent pace",
-	}
-
-	if avgW7d.Valid && avgW14d.Valid && avgW14d.Float64 > 0 {
-		delta := avgW7d.Float64 - avgW14d.Float64
-		report.WeeklyChangeKg = delta
-
-		switch strings.ToLower(goal) {
-		case "bulk":
-			if delta < 0.25 {
-				report.Recommendation = "Weight gain is slow for semi dirty bulk. Auto-adjusting +150 kcal."
-				report.DeltaKcalSuggested = 150.0
-			} else if delta > 0.80 {
-				report.Recommendation = "Gaining too quickly. Auto-reducing surplus by -150 kcal to protect body composition."
-				report.DeltaKcalSuggested = -150.0
-			} else {
-				report.Recommendation = "Optimal muscle-building pace (+0.3 to +0.7 kg/week)."
-			}
-		case "cut":
-			if delta > -0.15 {
-				report.Recommendation = "Weight loss stalled. Auto-adjusting deficit by -150 kcal."
-				report.DeltaKcalSuggested = -150.0
-			} else if delta < -0.85 {
-				report.Recommendation = "Losing weight too fast. Adding +100 kcal to preserve muscle tissue."
-				report.DeltaKcalSuggested = 100.0
-			} else {
-				report.Recommendation = "Optimal fat loss pace (-0.4 to -0.8 kg/week)."
-			}
-		case "recomp":
-			report.Recommendation = "Recomposition active. Weight should remain relatively flat while strength climbs."
-		default:
-			report.Recommendation = "Maintenance mode active."
-		}
-	} else {
-		report.Recommendation = "Collecting more daily weight logs (need 14 days of metrics for feedback loop)."
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(report)
 }
 
 func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {

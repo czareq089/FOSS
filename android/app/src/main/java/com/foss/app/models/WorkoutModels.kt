@@ -11,6 +11,7 @@ data class ExerciseInfo(
     @SerializedName("workout_exercise_id") val workoutExerciseId: Int,
     @SerializedName("exercise_id") val exerciseId: Int,
     @SerializedName("name") val name: String,
+    @SerializedName("type") val type: String = "Weight & Reps",
     @SerializedName("position") val position: Int,
     @SerializedName("template_sets") val templateSets: List<RoutineSet>?,
     @SerializedName("last_sets") val lastSets: List<LastSetValue>?
@@ -64,7 +65,11 @@ data class LastSetValue(
 data class WorkoutSummary(
     @SerializedName("workout_id") val workoutId: Int,
     @SerializedName("date") val date: String,
-    @SerializedName("routine_name") val routineName: String
+    @SerializedName("routine_name") val routineName: String,
+    @SerializedName("total_sets") val totalSets: Int = 0,
+    @SerializedName("total_reps") val totalReps: Int = 0,
+    @SerializedName("total_weight_kg") val totalWeightKg: Double = 0.0,
+    @SerializedName("pr_count") val prCount: Int = 0
 )
 
 data class ReorderPosition(
@@ -100,6 +105,42 @@ data class CreateExerciseReq(
     @SerializedName("equipment") val equipment: String
 )
 
+data class UpdateExerciseReq(
+    @SerializedName("id") val id: Int,
+    @SerializedName("name") val name: String,
+    @SerializedName("type") val type: String,
+    @SerializedName("equipment") val equipment: String
+)
+
+object ExerciseConstants {
+    val TYPES = listOf(
+        "Weight & Reps",
+        "Reps Only",
+        "Time & Distance",
+        "Time Only",
+        "Strength",
+        "Cardio",
+        "Stretching",
+        "Plyometrics",
+        "Powerlifting",
+        "Olympic Weightlifting"
+    )
+
+    val EQUIPMENTS = listOf(
+        "Barbell",
+        "Dumbbell",
+        "Machine",
+        "Cable",
+        "Body Only",
+        "Kettlebell",
+        "Bands",
+        "Medicine Ball",
+        "Exercise Ball",
+        "E-Z Curl Bar",
+        "Other"
+    )
+}
+
 data class AddRoutineExerciseReq(
     @SerializedName("routine_id") val routineId: Int,
     @SerializedName("exercise_id") val exerciseId: Int
@@ -121,7 +162,8 @@ data class WorkoutDetailSet(
     @SerializedName("weight_kg") val weightKg: Double,
     @SerializedName("reps") val reps: Int,
     @SerializedName("rir") val rir: Int,
-    @SerializedName("set_type") val setType: String = "standard"
+    @SerializedName("set_type") val setType: String = "standard",
+    @SerializedName("is_pr") val isPr: Boolean = false
 )
 
 data class WorkoutDetailExercise(

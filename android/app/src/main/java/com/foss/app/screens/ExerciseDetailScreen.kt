@@ -7,9 +7,14 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,10 +23,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.foss.app.AppViewModel
 import com.foss.app.UiState
+import com.foss.app.models.ExerciseConstants
 import com.foss.app.models.ExerciseDetailAnalytics
 import com.foss.app.models.ExerciseHistoryPoint
 import com.foss.app.ui.theme.AccentBlue
@@ -36,6 +43,7 @@ import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -58,13 +66,16 @@ fun ExerciseDetailScreen(
 ) {
     var selectedRange by remember { mutableStateOf("all") }
     var selectedMetric by remember { mutableStateOf(ChartMetric.VOLUME) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(exerciseId) {
         viewModel.loadExerciseAnalytics(exerciseId, "all")
     }
 
     val state = viewModel.exerciseAnalyticsState.value
-    val title = (state as? UiState.Success)?.data?.name ?: "Exercise Progress"
+    val analyticsData = (state as? UiState.Success)?.data
+    val title = analyticsData?.name ?: "Exercise Progress"
 
     Scaffold(
         topBar = {
@@ -86,6 +97,30 @@ fun ExerciseDetailScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                },
+                actions = {
+                    if (analyticsData != null) {
+                        val editSource = remember { MutableInteractionSource() }
+                        val isEditPressed by editSource.collectIsPressedAsState()
+
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .size(36.dp)
+                                .alpha(if (isEditPressed) 0.4f else 1f)
+                                .clickable(
+                                    interactionSource = editSource,
+                                    indication = null
+                                ) { showEditDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = "Edit Exercise",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             )
@@ -118,11 +153,30 @@ fun ExerciseDetailScreen(
                         selectedMetric = selectedMetric,
                         onMetricSelect = { selectedMetric = it },
                         selectedRange = selectedRange,
-                        onRangeSelect = { selectedRange = it }
+                        onRangeSelect = { selectedRange = it },
+                        onEditClick = { showEditDialog = true }
                     )
                 }
             }
         }
+    }
+
+    if (showEditDialog && analyticsData != null) {
+        EditExerciseDialog(
+            currentName = analyticsData.name,
+            currentType = analyticsData.type,
+            currentEquipment = analyticsData.equipment,
+            onDismiss = { showEditDialog = false },
+            onSave = { newName, newType, newEquipment ->
+                scope.launch {
+                    val ok = viewModel.updateExercise(exerciseId, newName, newType, newEquipment)
+                    showEditDialog = false
+                    if (ok) {
+                        viewModel.loadExerciseAnalytics(exerciseId, selectedRange)
+                    }
+                }
+            }
+        )
     }
 }
 
@@ -133,7 +187,8 @@ private fun AnalyticsContent(
     selectedMetric: ChartMetric,
     onMetricSelect: (ChartMetric) -> Unit,
     selectedRange: String,
-    onRangeSelect: (String) -> Unit
+    onRangeSelect: (String) -> Unit,
+    onEditClick: () -> Unit
 ) {
     val modelProducer = remember { CartesianChartModelProducer() }
 
@@ -177,6 +232,64 @@ private fun AnalyticsContent(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        OutlinedCard(
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = analytics.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = analytics.type.ifBlank { "General" },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = analytics.equipment.ifBlank { "None" },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+                IconButton(onClick = onEditClick) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = "Edit",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             ChartMetric.entries.forEachIndexed { index, metric ->
                 SegmentedButton(
@@ -326,4 +439,109 @@ private fun filterHistoryByRange(history: List<ExerciseHistoryPoint>, range: Str
             true
         }
     }
+}
+
+@Composable
+private fun EditExerciseDialog(
+    currentName: String,
+    currentType: String,
+    currentEquipment: String,
+    onDismiss: () -> Unit,
+    onSave: (name: String, type: String, equipment: String) -> Unit
+) {
+    var name by remember { mutableStateOf(currentName) }
+    var type by remember { mutableStateOf(currentType) }
+    var equipment by remember { mutableStateOf(currentEquipment) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Exercise", color = MaterialTheme.colorScheme.onSurface) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Exercise name") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "Exercise Type / Tracking",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(ExerciseConstants.TYPES) { t ->
+                        FilterChip(
+                            selected = type.equals(t, ignoreCase = true),
+                            onClick = { type = t },
+                            label = { Text(t, fontSize = 12.sp) }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = type,
+                    onValueChange = { type = it },
+                    label = { Text("Category / Type") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "Equipment",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(ExerciseConstants.EQUIPMENTS) { eq ->
+                        FilterChip(
+                            selected = equipment.equals(eq, ignoreCase = true),
+                            onClick = { equipment = eq },
+                            label = { Text(eq, fontSize = 12.sp) }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = equipment,
+                    onValueChange = { equipment = it },
+                    label = { Text("Equipment (e.g. Barbell, Machine)") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onSave(name.trim(), type.trim(), equipment.trim())
+                    }
+                }
+            ) {
+                Text("Save", color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp)
+    )
 }

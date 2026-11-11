@@ -6,8 +6,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -18,8 +21,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.foss.app.UiState
 import com.foss.app.AppViewModel
+import com.foss.app.models.ExerciseConstants
 import com.foss.app.models.ExerciseItem
 import kotlinx.coroutines.launch
 
@@ -27,6 +32,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ExerciseSelectionScreen(
     viewModel: AppViewModel,
+    isExplorerMode: Boolean = false,
     onExerciseSelected: (Int) -> Unit,
     onBack: () -> Unit
 ) {
@@ -44,7 +50,7 @@ fun ExerciseSelectionScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Select exercise") },
+                title = { Text(if (isExplorerMode) "Exercise Explorer" else "Select exercise") },
                 navigationIcon = {
                     val backSource = remember { MutableInteractionSource() }
                     val isBackPressed by backSource.collectIsPressedAsState()
@@ -152,9 +158,11 @@ fun ExerciseSelectionScreen(
                                 items(filtered, key = { it.id }) { exercise ->
                                     ExerciseSelectCard(
                                         exercise = exercise,
-                                        isSubmitting = submittingId == exercise.id,
+                                        isSubmitting = !isExplorerMode && submittingId == exercise.id,
                                         onClick = {
-                                            if (submittingId == null) {
+                                            if (isExplorerMode) {
+                                                onExerciseSelected(exercise.id)
+                                            } else if (submittingId == null) {
                                                 submittingId = exercise.id
                                                 onExerciseSelected(exercise.id)
                                             }
@@ -193,15 +201,17 @@ private fun CreateExerciseDialog(
     onCreate: (name: String, type: String, equipment: String) -> Unit
 ) {
     var name by remember { mutableStateOf(initialName) }
-    var type by remember { mutableStateOf("Strength") }
-    var equipment by remember { mutableStateOf("Barbell") }
+    var type by remember { mutableStateOf(ExerciseConstants.TYPES.firstOrNull() ?: "Weight & Reps") }
+    var equipment by remember { mutableStateOf(ExerciseConstants.EQUIPMENTS.firstOrNull() ?: "Barbell") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add Custom Exercise", color = MaterialTheme.colorScheme.onSurface) },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 OutlinedTextField(
@@ -213,6 +223,23 @@ private fun CreateExerciseDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                Text(
+                    text = "Exercise Type / Tracking",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(ExerciseConstants.TYPES) { t ->
+                        FilterChip(
+                            selected = type.equals(t, ignoreCase = true),
+                            onClick = { type = t },
+                            label = { Text(t, fontSize = 12.sp) }
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = type,
                     onValueChange = { type = it },
@@ -222,6 +249,23 @@ private fun CreateExerciseDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                Text(
+                    text = "Equipment",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(ExerciseConstants.EQUIPMENTS) { eq ->
+                        FilterChip(
+                            selected = equipment.equals(eq, ignoreCase = true),
+                            onClick = { equipment = eq },
+                            label = { Text(eq, fontSize = 12.sp) }
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = equipment,
                     onValueChange = { equipment = it },
