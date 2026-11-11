@@ -1,10 +1,22 @@
 package main
 
 import (
-	"fmt"
+	"database/sql"
 	"log"
 	"net/http"
 )
+
+func closeDB(db *sql.DB) {
+	if db != nil {
+		_ = db.Close()
+	}
+}
+
+func closeRows(rows *sql.Rows) {
+	if rows != nil {
+		_ = rows.Close()
+	}
+}
 
 const dbPath = "database/foss.db"
 
@@ -76,7 +88,7 @@ func main() {
 
 	// Uruchomienie serwera
 	port := ":8080"
-	fmt.Printf("F.O.S.S. Server running at: http://localhost%s\n", port)
+	log.Printf("F.O.S.S. Server running at: http://localhost%s\n", port)
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}

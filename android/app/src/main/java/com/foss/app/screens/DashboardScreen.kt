@@ -43,6 +43,7 @@ fun DashboardScreen(
     val dietDates = (viewModel.dietConsistencyStatsState.value as? UiState.Success)?.data?.workoutDates ?: emptyList()
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Dashboard") },

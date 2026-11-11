@@ -100,6 +100,7 @@ fun FossApp() {
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             Column {
                 if (activeWorkoutId != null && !isWorkoutLoggingRoute) {
@@ -124,7 +125,9 @@ fun FossApp() {
         NavHost(
             navController = navController,
             startDestination = BottomNavItem.Dashboard.route,
-            modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()),
+            modifier = Modifier
+                .padding(bottom = innerPadding.calculateBottomPadding())
+                .consumeWindowInsets(PaddingValues(bottom = innerPadding.calculateBottomPadding())),
             enterTransition = {
                 slideInHorizontally(
                     initialOffsetX = { 100 },

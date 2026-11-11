@@ -29,7 +29,7 @@ func handleWidgetVolume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	rangeQuery := strings.ToLower(r.URL.Query().Get("range"))
 	if rangeQuery == "" {
@@ -58,7 +58,7 @@ func handleWidgetVolume(w http.ResponseWriter, r *http.Request) {
 		JOIN training_workouts w ON we.workout_id = w.id
 		WHERE w.user_id = 1 AND s.weight_kg > 0 AND s.reps > 0`
 
-	var args []interface{}
+	var args []any
 	query := baseQuery
 	if interval != "" {
 		query += ` AND w.date >= datetime('now', ?)`
@@ -91,7 +91,7 @@ func handleWidgetVolume(w http.ResponseWriter, r *http.Request) {
 		</div>`, btnClass("1d"), btnClass("7d"), btnClass("1m"), btnClass("all"), totalVolume)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, html)
+	_, _ = fmt.Fprint(w, html)
 }
 
 // 2. Widżet Powtórzeń i Serii (Total Reps & Sets)
@@ -101,7 +101,7 @@ func handleWidgetReps(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	rangeQuery := strings.ToLower(r.URL.Query().Get("range"))
 	if rangeQuery == "" {
@@ -130,7 +130,7 @@ func handleWidgetReps(w http.ResponseWriter, r *http.Request) {
 		JOIN training_workouts w ON we.workout_id = w.id
 		WHERE w.user_id = 1 AND s.reps > 0`
 
-	var args []interface{}
+	var args []any
 	query := baseQuery
 	if interval != "" {
 		query += ` AND w.date >= datetime('now', ?)`
@@ -165,7 +165,7 @@ func handleWidgetReps(w http.ResponseWriter, r *http.Request) {
 		</div>`, btnClass("1d"), btnClass("7d"), btnClass("1m"), btnClass("all"), totalReps, totalSets)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, html)
+	_, _ = fmt.Fprint(w, html)
 }
 
 // 3. Widżet Najczęstszych Ćwiczeń
@@ -175,7 +175,7 @@ func handleWidgetTopExercises(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	query := `
 		SELECT te.name, COUNT(tws.id) as set_count
@@ -191,7 +191,7 @@ func handleWidgetTopExercises(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(query)
 	itemsHTML := ""
 	if err == nil {
-		defer rows.Close()
+		defer closeRows(rows)
 		rank := 1
 		for rows.Next() {
 			var name string
@@ -222,7 +222,7 @@ func handleWidgetTopExercises(w http.ResponseWriter, r *http.Request) {
 		</div>`, itemsHTML)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, html)
+	_, _ = fmt.Fprint(w, html)
 }
 
 // 4. Widżet Największego Progresu (1RM Epley)
@@ -232,7 +232,7 @@ func handleWidgetBiggestProgress(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	query := `
 		WITH ExerciseSessions AS (
@@ -252,7 +252,7 @@ func handleWidgetBiggestProgress(w http.ResponseWriter, r *http.Request) {
 			SELECT 
 				ex_name,
 				best_1rm,
-				ROW_NUMBER() OVER(PARTITION BY ex_name ORDER BY w_date ASC) as rn_first,
+				ROW_NUMBER() OVER(PARTITION BY ex_name ORDER BY w_date) as rn_first,
 				ROW_NUMBER() OVER(PARTITION BY ex_name ORDER BY w_date DESC) as rn_last
 			FROM ExerciseSessions
 		)
@@ -268,7 +268,7 @@ func handleWidgetBiggestProgress(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(query)
 	itemsHTML := ""
 	if err == nil {
-		defer rows.Close()
+		defer closeRows(rows)
 		rank := 1
 		for rows.Next() {
 			var name string
@@ -299,7 +299,7 @@ func handleWidgetBiggestProgress(w http.ResponseWriter, r *http.Request) {
 		</div>`, itemsHTML)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, html)
+	_, _ = fmt.Fprint(w, html)
 }
 
 // 5. Widżet Liczby Treningów
@@ -309,7 +309,7 @@ func handleWidgetOverallProgress(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var totalWorkouts int
 	_ = db.QueryRow(`SELECT COUNT(id) FROM training_workouts WHERE user_id = 1`).Scan(&totalWorkouts)
@@ -326,7 +326,7 @@ func handleWidgetOverallProgress(w http.ResponseWriter, r *http.Request) {
 		</div>`, totalWorkouts)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, html)
+	_, _ = fmt.Fprint(w, html)
 }
 
 // 6. Widżet Makroskładników
@@ -349,7 +349,7 @@ func handleWidgetMacros(w http.ResponseWriter, r *http.Request) {
 			</div>
 		</div>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, html)
+	_, _ = fmt.Fprint(w, html)
 }
 
 // 7. Widżet Deficytu Makro
@@ -368,7 +368,7 @@ func handleWidgetMacroDeficit(w http.ResponseWriter, r *http.Request) {
 			</div>
 		</div>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, html)
+	_, _ = fmt.Fprint(w, html)
 }
 
 func handleWidgetVolumeHistory(w http.ResponseWriter, r *http.Request) {
@@ -377,7 +377,7 @@ func handleWidgetVolumeHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 	query := `
 		SELECT 
 			w.id,
@@ -388,8 +388,8 @@ func handleWidgetVolumeHistory(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN training_workout_exercises we ON we.workout_id = w.id
 		LEFT JOIN training_workout_sets s ON s.workout_exercise_id = we.id AND s.weight_kg > 0 AND s.reps > 0
 		WHERE w.user_id = 1
-		GROUP BY w.id
-		ORDER BY w.date ASC, w.id ASC
+		GROUP BY w.id, w.date, r.name
+		ORDER BY w.date, w.id
 		LIMIT 15`
 
 	rows, err := db.Query(query)
@@ -397,7 +397,7 @@ func handleWidgetVolumeHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	type ChartResponse struct {
 		Labels []string  `json:"labels"`
@@ -420,7 +420,7 @@ func handleWidgetVolumeHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // ==========================================
@@ -433,7 +433,7 @@ func handleWebTrainingList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	if r.Method == http.MethodPost {
 		name := strings.TrimSpace(r.FormValue("name"))
@@ -460,7 +460,7 @@ func handleWebTrainingList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var sb strings.Builder
 	hasRoutines := false
@@ -469,7 +469,9 @@ func handleWebTrainingList(w http.ResponseWriter, r *http.Request) {
 		hasRoutines = true
 		var id, count int
 		var name string
-		rows.Scan(&id, &name, &count)
+		if err := rows.Scan(&id, &name, &count); err != nil {
+			continue
+		}
 
 		sb.WriteString(fmt.Sprintf(`
 			<div class="routine-card" id="routine-%d">
@@ -500,7 +502,7 @@ func handleWebTrainingList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, sb.String())
+	_, _ = fmt.Fprint(w, sb.String())
 }
 
 func handleWebTrainingDetail(w http.ResponseWriter, r *http.Request) {
@@ -515,12 +517,12 @@ func handleWebTrainingDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var routineName string
 	err = db.QueryRow(`SELECT name FROM training_routines WHERE id = ? AND user_id = 1`, routineID).Scan(&routineName)
 	if err != nil {
-		fmt.Fprint(w, "<p>Routine not found.</p>")
+		_, _ = fmt.Fprint(w, "<p>Routine not found.</p>")
 		return
 	}
 
@@ -534,21 +536,25 @@ func handleWebTrainingDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var exercisesHTML strings.Builder
 	idx := 1
 	for rows.Next() {
 		var reID int
 		var exName, exType, exEq string
-		rows.Scan(&reID, &exName, &exType, &exEq)
+		if err := rows.Scan(&reID, &exName, &exType, &exEq); err != nil {
+			continue
+		}
 
 		tRows, _ := db.Query(`SELECT set_number, set_type FROM training_routine_sets WHERE routine_exercise_id = ? ORDER BY set_number`, reID)
 		setTags := ""
 		for tRows.Next() {
 			var sNum int
 			var sType string
-			tRows.Scan(&sNum, &sType)
+			if err := tRows.Scan(&sNum, &sType); err != nil {
+				continue
+			}
 			badgeColor := "var(--color-surface-2)"
 			badgeText := fmt.Sprintf("Set %d", sNum)
 			if sType == "warmup" {
@@ -566,7 +572,7 @@ func handleWebTrainingDetail(w http.ResponseWriter, r *http.Request) {
 			}
 			setTags += fmt.Sprintf(`<span style="background: %s; color: #fff; padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; margin-right: 6px; font-weight: 600;">%s</span>`, badgeColor, badgeText)
 		}
-		tRows.Close()
+		closeRows(tRows)
 
 		if setTags == "" {
 			setTags = `<span style="color: var(--color-text-dim); font-size: 0.8rem;">Standard sets</span>`
@@ -606,7 +612,7 @@ func handleWebTrainingDetail(w http.ResponseWriter, r *http.Request) {
 		</div>`, routineName, exercisesHTML.String(), routineID)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, html)
+	_, _ = fmt.Fprint(w, html)
 }
 
 func handleWebRoutineEditModal(w http.ResponseWriter, r *http.Request) {
@@ -621,25 +627,27 @@ func handleWebRoutineEditModal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var routineName string
 	err = db.QueryRow(`SELECT name FROM training_routines WHERE id = ? AND user_id = 1`, routineID).Scan(&routineName)
 	if err != nil {
-		fmt.Fprint(w, "<p>Routine not found.</p>")
+		_, _ = fmt.Fprint(w, "<p>Routine not found.</p>")
 		return
 	}
 
-	allExRows, _ := db.Query(`SELECT id, name FROM training_exercises ORDER BY name ASC`)
+	allExRows, _ := db.Query(`SELECT id, name FROM training_exercises ORDER BY name`)
 	var allExercisesHTML strings.Builder
 	allExercisesHTML.WriteString(`<option value="">-- Choose exercise to add --</option>`)
 	for allExRows.Next() {
 		var id int
 		var name string
-		allExRows.Scan(&id, &name)
+		if err := allExRows.Scan(&id, &name); err != nil {
+			continue
+		}
 		allExercisesHTML.WriteString(fmt.Sprintf(`<option value="%d">%s</option>`, id, name))
 	}
-	allExRows.Close()
+	closeRows(allExRows)
 
 	rows, err := db.Query(`
 		SELECT re.id, re.exercise_id, e.name, e.type, e.equipment
@@ -651,7 +659,7 @@ func handleWebRoutineEditModal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf(`
@@ -674,7 +682,9 @@ func handleWebRoutineEditModal(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var reID, exID int
 		var exName, exType, exEq string
-		rows.Scan(&reID, &exID, &exName, &exType, &exEq)
+		if err := rows.Scan(&reID, &exID, &exName, &exType, &exEq); err != nil {
+			continue
+		}
 
 		sb.WriteString(fmt.Sprintf(`
 			<div class="routine-ex-card" style="background: var(--color-surface-2); padding: 12px; border-radius: var(--radius-md); margin-bottom: 12px; border: 1px solid var(--color-border);" id="ex-card-%d">
@@ -695,7 +705,9 @@ func handleWebRoutineEditModal(w http.ResponseWriter, r *http.Request) {
 		for tRows.Next() {
 			var sNum int
 			var sType string
-			tRows.Scan(&sNum, &sType)
+			if err := tRows.Scan(&sNum, &sType); err != nil {
+				continue
+			}
 			setCount++
 
 			sb.WriteString(fmt.Sprintf(`
@@ -716,7 +728,7 @@ func handleWebRoutineEditModal(w http.ResponseWriter, r *http.Request) {
 				selectedAttr(sType == "drop"),
 				selectedAttr(sType == "back_off")))
 		}
-		tRows.Close()
+		closeRows(tRows)
 
 		if setCount == 0 {
 			for s := 1; s <= 3; s++ {
@@ -765,7 +777,7 @@ func handleWebRoutineEditModal(w http.ResponseWriter, r *http.Request) {
 	`, allExercisesHTML.String()))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, sb.String())
+	_, _ = fmt.Fprint(w, sb.String())
 }
 
 func selectedAttr(cond bool) string {
@@ -794,7 +806,7 @@ func handleWebRoutineSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -809,7 +821,7 @@ func handleWebRoutineSave(w http.ResponseWriter, r *http.Request) {
 	exerciseIDs := r.Form["exercise_ids"]
 	for pos, exIDStr := range exerciseIDs {
 		var exID int
-		fmt.Sscanf(exIDStr, "%d", &exID)
+		_, _ = fmt.Sscanf(exIDStr, "%d", &exID)
 		if exID == 0 {
 			continue
 		}
@@ -840,16 +852,17 @@ func handleWebWorkoutsTab(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	if r.Method == http.MethodDelete {
 		workoutID := r.URL.Query().Get("id")
 		if workoutID != "" {
-			tx, _ := db.Begin()
-			tx.Exec(`DELETE FROM training_workout_sets WHERE workout_exercise_id IN (SELECT id FROM training_workout_exercises WHERE workout_id = ?)`, workoutID)
-			tx.Exec(`DELETE FROM training_workout_exercises WHERE workout_id = ?`, workoutID)
-			tx.Exec(`DELETE FROM training_workouts WHERE id = ?`, workoutID)
-			tx.Commit()
+			if tx, err := db.Begin(); err == nil {
+				_, _ = tx.Exec(`DELETE FROM training_workout_sets WHERE workout_exercise_id IN (SELECT id FROM training_workout_exercises WHERE workout_id = ?)`, workoutID)
+				_, _ = tx.Exec(`DELETE FROM training_workout_exercises WHERE workout_id = ?`, workoutID)
+				_, _ = tx.Exec(`DELETE FROM training_workouts WHERE id = ?`, workoutID)
+				_ = tx.Commit()
+			}
 		}
 	}
 
@@ -873,7 +886,7 @@ func handleWebWorkoutsTab(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Query error: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	var sb strings.Builder
 	hasWorkouts := false
@@ -937,7 +950,7 @@ func handleWebWorkoutsTab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, sb.String())
+	_, _ = fmt.Fprint(w, sb.String())
 }
 
 func handleWebWorkoutEditModal(w http.ResponseWriter, r *http.Request) {
@@ -952,7 +965,7 @@ func handleWebWorkoutEditModal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var workoutDate, routineName string
 	err = db.QueryRow(`
@@ -962,7 +975,7 @@ func handleWebWorkoutEditModal(w http.ResponseWriter, r *http.Request) {
 		WHERE w.id = ? AND w.user_id = 1`, workoutID).Scan(&workoutDate, &routineName)
 
 	if err != nil {
-		fmt.Fprint(w, "<p>Workout not found.</p>")
+		_, _ = fmt.Fprint(w, "<p>Workout not found.</p>")
 		return
 	}
 
@@ -976,7 +989,7 @@ func handleWebWorkoutEditModal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
 	type wEx struct {
 		weID int
@@ -986,7 +999,9 @@ func handleWebWorkoutEditModal(w http.ResponseWriter, r *http.Request) {
 	var exercises []wEx
 	for rows.Next() {
 		var item wEx
-		rows.Scan(&item.weID, &item.exID, &item.name)
+		if err := rows.Scan(&item.weID, &item.exID, &item.name); err != nil {
+			continue
+		}
 		exercises = append(exercises, item)
 	}
 
@@ -1027,7 +1042,9 @@ func handleWebWorkoutEditModal(w http.ResponseWriter, r *http.Request) {
 		for setRows.Next() {
 			var setNum, reps, rir int
 			var weight float64
-			setRows.Scan(&setNum, &weight, &reps, &rir)
+			if err := setRows.Scan(&setNum, &weight, &reps, &rir); err != nil {
+				continue
+			}
 
 			sb.WriteString(fmt.Sprintf(`
 				<tr>
@@ -1039,7 +1056,7 @@ func handleWebWorkoutEditModal(w http.ResponseWriter, r *http.Request) {
 			`, setIdx, exIdx, setIdx-1, weight, exIdx, setIdx-1, reps, exIdx, setIdx-1, rir))
 			setIdx++
 		}
-		setRows.Close()
+		closeRows(setRows)
 
 		sb.WriteString(fmt.Sprintf(`
 					</tbody>
@@ -1060,7 +1077,7 @@ func handleWebWorkoutEditModal(w http.ResponseWriter, r *http.Request) {
 	`, len(exercises)))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, sb.String())
+	_, _ = fmt.Fprint(w, sb.String())
 }
 
 func handleWebWorkoutSave(w http.ResponseWriter, r *http.Request) {
@@ -1081,7 +1098,7 @@ func handleWebWorkoutSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -1093,12 +1110,12 @@ func handleWebWorkoutSave(w http.ResponseWriter, r *http.Request) {
 	_, _ = tx.Exec(`DELETE FROM training_workout_exercises WHERE workout_id = ?`, workoutID)
 
 	var exCount int
-	fmt.Sscanf(r.FormValue("exercises_count"), "%d", &exCount)
+	_, _ = fmt.Sscanf(r.FormValue("exercises_count"), "%d", &exCount)
 
 	for i := 0; i < exCount; i++ {
 		exIDStr := r.FormValue(fmt.Sprintf("exercise_id_%d", i))
 		var exID int
-		fmt.Sscanf(exIDStr, "%d", &exID)
+		_, _ = fmt.Sscanf(exIDStr, "%d", &exID)
 
 		res, err := tx.Exec(`INSERT INTO training_workout_exercises (workout_id, exercise_id, position) VALUES (?, ?, ?)`, workoutID, exID, i+1)
 		if err != nil {
@@ -1107,14 +1124,14 @@ func handleWebWorkoutSave(w http.ResponseWriter, r *http.Request) {
 		weID, _ := res.LastInsertId()
 
 		var setsCount int
-		fmt.Sscanf(r.FormValue(fmt.Sprintf("sets_count_%d", i)), "%d", &setsCount)
+		_, _ = fmt.Sscanf(r.FormValue(fmt.Sprintf("sets_count_%d", i)), "%d", &setsCount)
 
 		for s := 0; s < setsCount; s++ {
 			var weight float64
 			var reps, rir int
-			fmt.Sscanf(r.FormValue(fmt.Sprintf("weight_%d_%d", i, s)), "%f", &weight)
-			fmt.Sscanf(r.FormValue(fmt.Sprintf("reps_%d_%d", i, s)), "%d", &reps)
-			fmt.Sscanf(r.FormValue(fmt.Sprintf("rir_%d_%d", i, s)), "%d", &rir)
+			_, _ = fmt.Sscanf(r.FormValue(fmt.Sprintf("weight_%d_%d", i, s)), "%f", &weight)
+			_, _ = fmt.Sscanf(r.FormValue(fmt.Sprintf("reps_%d_%d", i, s)), "%d", &reps)
+			_, _ = fmt.Sscanf(r.FormValue(fmt.Sprintf("rir_%d_%d", i, s)), "%d", &rir)
 
 			_, _ = tx.Exec(`
 				INSERT INTO training_workout_sets (workout_exercise_id, set_number, weight_kg, reps, rir, set_type)

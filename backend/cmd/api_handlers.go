@@ -3,7 +3,9 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"strings"
@@ -11,6 +13,14 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("writeJSON encode error: %v", err)
+	}
+}
 
 // ==========================================
 // STRUKTURY DANYCH (JSON)
@@ -73,6 +83,7 @@ type RoutineExercisePreview struct {
 	RoutineExerciseID int            `json:"routine_exercise_id"`
 	ExerciseID        int            `json:"exercise_id"`
 	Name              string         `json:"name"`
+	Type              string         `json:"type"`
 	Position          int            `json:"position"`
 	TemplateSets      []RoutineSet   `json:"template_sets"`
 	LastSets          []LastSetValue `json:"last_sets"`
@@ -151,6 +162,7 @@ type WorkoutDetailExercise struct {
 	WorkoutExerciseID int                `json:"workout_exercise_id"`
 	ExerciseID        int                `json:"exercise_id"`
 	Name              string             `json:"name"`
+	Type              string             `json:"type"`
 	Position          int                `json:"position"`
 	Sets              []WorkoutDetailSet `json:"sets"`
 }
@@ -261,7 +273,7 @@ type UserDietSettingsModel struct {
 	TargetProtein   float64                 `json:"target_protein"`
 	TargetFat       float64                 `json:"target_fat"`
 	TargetCarbs     float64                 `json:"target_carbs"`
-	StrategyTargets map[string]MacroTargets `json:"strategy_targets"`
+	StrategyTargets map[string]MacroTargets `json:"strategy_targets,omitempty"`
 }
 
 type DietProductItem struct {
@@ -337,44 +349,10 @@ type DailyDietSummaryResp struct {
 }
 
 // ==========================================
-// CELE KALORYCZNE I STRATEGIE ŻYWIENIOWE
+// SILNIK ALGORYTMÓW METABOLICZNYCH
 // ==========================================
 
-func computeDefaultStrategyTargets(tdeeBase, currentWeight float64, hadWorkout bool) map[string]MacroTargets {
-	bulkKcal := tdeeBase + 500.0
-	bulkP := 1.9 * currentWeight
-	bulkF := 1.1 * currentWeight
-	bulkC := math.Max(0, (bulkKcal-(bulkP*4.0+bulkF*9.0))/4.0)
-
-	cutKcal := math.Max(1400.0, tdeeBase-400.0)
-	cutP := 2.3 * currentWeight
-	cutF := 0.8 * currentWeight
-	cutC := math.Max(0, (cutKcal-(cutP*4.0+cutF*9.0))/4.0)
-
-	var recompKcal float64
-	if hadWorkout {
-		recompKcal = tdeeBase + 200.0
-	} else {
-		recompKcal = math.Max(1500.0, tdeeBase-200.0)
-	}
-	recompP := 2.2 * currentWeight
-	recompF := 0.9 * currentWeight
-	recompC := math.Max(0, (recompKcal-(recompP*4.0+recompF*9.0))/4.0)
-
-	maintainKcal := tdeeBase
-	maintainP := 1.8 * currentWeight
-	maintainF := 1.0 * currentWeight
-	maintainC := math.Max(0, (maintainKcal-(maintainP*4.0+maintainF*9.0))/4.0)
-
-	return map[string]MacroTargets{
-		"bulk":     {Kcal: math.Round(bulkKcal), Protein: math.Round(bulkP), Fat: math.Round(bulkF), Carbs: math.Round(bulkC)},
-		"cut":      {Kcal: math.Round(cutKcal), Protein: math.Round(cutP), Fat: math.Round(cutF), Carbs: math.Round(cutC)},
-		"recomp":   {Kcal: math.Round(recompKcal), Protein: math.Round(recompP), Fat: math.Round(recompF), Carbs: math.Round(recompC)},
-		"maintain": {Kcal: math.Round(maintainKcal), Protein: math.Round(maintainP), Fat: math.Round(maintainF), Carbs: math.Round(maintainC)},
-	}
-}
-
-func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, protein, fat, carbs float64, currentWeight float64, height float64, goal string, targetWeight float64, allStrategies map[string]MacroTargets) {
+func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, protein, fat, carbs float64, currentWeight float64, height float64, goal string, targetWeight float64) {
 	height = 174.0
 	targetWeight = 78.0
 	goal = "bulk"
@@ -382,15 +360,10 @@ func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, p
 	deficitKcal := 400.0
 	workoutBonusKcal := 350.0
 
-	var rawStrategyTargets sql.NullString
-	var manualKcal, manualProtein, manualFat, manualCarbs sql.NullFloat64
-
 	_ = db.QueryRow(`
-       SELECT height_cm, target_weight_kg, COALESCE(goal, 'bulk'), surplus_kcal, deficit_kcal, workout_bonus_kcal,
-              strategy_targets, target_kcal, target_protein, target_fat, target_carbs
+       SELECT height_cm, target_weight_kg, goal, surplus_kcal, deficit_kcal, workout_bonus_kcal
        FROM user_diet_settings WHERE user_id = ?`, userID).
-		Scan(&height, &targetWeight, &goal, &surplusKcal, &deficitKcal, &workoutBonusKcal,
-			&rawStrategyTargets, &manualKcal, &manualProtein, &manualFat, &manualCarbs)
+		Scan(&height, &targetWeight, &goal, &surplusKcal, &deficitKcal, &workoutBonusKcal)
 
 	// Ostatnia znana waga użytkownika
 	_ = db.QueryRow(`
@@ -414,11 +387,12 @@ func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, p
 	}
 
 	// Wzór Mifflina-St Jeora (BMR)
-	bmr := (10.0 * currentWeight) + (6.25 * height) - (5.0 * age) + 5.0
+	bmr := 10.0*currentWeight + 6.25*height - 5.0*age + 5.0
 
-	// Bazowe utrzymanie: sedentary (BMR * 1.2) + stały NEAT (~200 kcal)
-	sedentaryBase := (bmr * 1.2) + 200.0
+	// Bazowe utrzymanie: sedentary (BMR * 1.2) + stały NEAT z 5000 kroków (~200 kcal)
+	sedentaryBase := bmr*1.2 + 200.0
 
+	// Czy odbył się trening danego dnia
 	targetDateQuery := dateStr
 	if targetDateQuery == "now" {
 		targetDateQuery = time.Now().Format("2006-01-02")
@@ -434,49 +408,73 @@ func calculateDynamicTargets(db *sql.DB, userID string, dateStr string) (kcal, p
 		eat = workoutBonusKcal
 	}
 
-	tdeeBase := sedentaryBase + eat
+	// Feedback loop: adaptacja do tempa zmian wagi (średnia 7d vs 14d)
+	var avgWeight7d, avgWeight14d sql.NullFloat64
+	_ = db.QueryRow(`
+       SELECT AVG(weight_kg) FROM user_daily_metrics 
+       WHERE user_id = ? AND date >= date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgWeight7d)
+	_ = db.QueryRow(`
+       SELECT AVG(weight_kg) FROM user_daily_metrics 
+       WHERE user_id = ? AND date >= date('now', '-14 days') AND date < date('now', '-7 days') AND weight_kg > 0`, userID).Scan(&avgWeight14d)
 
-	allStrategies = computeDefaultStrategyTargets(tdeeBase, currentWeight, hadWorkout > 0)
-
-	// Nałożenie ręcznie skonfigurowanych celów strategii jeśli istnieją w DB
-	if rawStrategyTargets.Valid && strings.TrimSpace(rawStrategyTargets.String) != "" {
-		var custom map[string]MacroTargets
-		if err := json.Unmarshal([]byte(rawStrategyTargets.String), &custom); err == nil {
-			for k, v := range custom {
-				if v.Kcal > 0 {
-					allStrategies[k] = v
-				}
+	feedbackKcalAdjustment := 0.0
+	if avgWeight7d.Valid && avgWeight14d.Valid && avgWeight14d.Float64 > 0 {
+		deltaW := avgWeight7d.Float64 - avgWeight14d.Float64 // tempo kg na tydzień
+		if goal == "bulk" {
+			if deltaW < 0.25 {
+				feedbackKcalAdjustment = 150.0 // waga rośnie za wolno na semi dirty bulk -> podbijamy
+			} else if deltaW > 0.80 {
+				feedbackKcalAdjustment = -150.0 // za szybkie zalewanie -> korygujemy w dół
+			}
+		} else if goal == "cut" {
+			if deltaW > -0.15 {
+				feedbackKcalAdjustment = -150.0 // zastój na redukcji
+			} else if deltaW < -0.80 {
+				feedbackKcalAdjustment = 100.0 // za ostry spadek wagi
 			}
 		}
 	}
 
-	goalKey := strings.ToLower(goal)
-	if goalKey == "" {
-		goalKey = "bulk"
+	tdeeBase := sedentaryBase + eat + feedbackKcalAdjustment
+
+	var pPerKg, fPerKg float64
+	switch strings.ToLower(goal) {
+	case "bulk":
+		// Semi Dirty Bulk: maksymalizacja siły i szybki przyrost masy, wyższy pułap tłuszczu pod gęste kalorie
+		kcal = tdeeBase + surplusKcal
+		pPerKg = 1.9
+		fPerKg = 1.4
+	case "cut":
+		kcal = math.Max(1400.0, tdeeBase-deficitKcal)
+		pPerKg = 2.3
+		fPerKg = 0.8
+	case "recomp":
+		if hadWorkout > 0 {
+			kcal = tdeeBase + 200.0
+		} else {
+			kcal = math.Max(1500.0, tdeeBase-200.0)
+		}
+		pPerKg = 2.2
+		fPerKg = 0.9
+	case "maintain":
+		fallthrough
+	default:
+		kcal = tdeeBase
+		pPerKg = 1.8
+		fPerKg = 1.0
 	}
 
-	activeTargets, ok := allStrategies[goalKey]
-	if !ok {
-		activeTargets = allStrategies["bulk"]
-		goalKey = "bulk"
+	protein = pPerKg * currentWeight
+	fat = fPerKg * currentWeight
+
+	remainingCalories := kcal - (protein*4.0 + fat*9.0)
+	if remainingCalories > 0 {
+		carbs = remainingCalories / 4.0
+	} else {
+		carbs = 0.0
 	}
 
-	// Zgodność wsteczna z manualnymi polami
-	if manualKcal.Valid && manualKcal.Float64 > 0 {
-		activeTargets.Kcal = manualKcal.Float64
-	}
-	if manualProtein.Valid && manualProtein.Float64 > 0 {
-		activeTargets.Protein = manualProtein.Float64
-	}
-	if manualFat.Valid && manualFat.Float64 > 0 {
-		activeTargets.Fat = manualFat.Float64
-	}
-	if manualCarbs.Valid && manualCarbs.Float64 > 0 {
-		activeTargets.Carbs = manualCarbs.Float64
-	}
-	allStrategies[goalKey] = activeTargets
-
-	return activeTargets.Kcal, activeTargets.Protein, activeTargets.Fat, activeTargets.Carbs, currentWeight, height, goal, targetWeight, allStrategies
+	return kcal, protein, fat, carbs, currentWeight, height, goal, targetWeight
 }
 
 // ==========================================
@@ -496,7 +494,7 @@ func normalizeSetType(setType string) string {
 // loadLastSetsByCompositeKey zwraca ostatnią znaną wartość osobno dla każdego
 // dokładnego klucza (set_number, set_type). Dzięki temu np. warmup #1 i
 // standard #1 są dwiema niezależnymi pozycjami historii autofillu.
-func loadLastSetsByCompositeKey(db *sql.DB, userID interface{}, exerciseID int, excludeWorkoutID int) []LastSetValue {
+func loadLastSetsByCompositeKey(db *sql.DB, userID any, exerciseID int, excludeWorkoutID int) []LastSetValue {
 	query := `
         SELECT s.set_number, s.weight_kg, s.reps, s.rir, s.set_type
         FROM training_workout_sets s
@@ -518,7 +516,7 @@ func loadLastSetsByCompositeKey(db *sql.DB, userID interface{}, exerciseID int, 
               ORDER BY w2.date DESC, w2.id DESC, we2.id DESC
               LIMIT 1
           )
-        ORDER BY s.set_number ASC, s.set_type ASC`
+        ORDER BY s.set_number, s.set_type`
 
 	rows, err := db.Query(
 		query,
@@ -526,11 +524,11 @@ func loadLastSetsByCompositeKey(db *sql.DB, userID interface{}, exerciseID int, 
 		userID, exerciseID, excludeWorkoutID, excludeWorkoutID,
 	)
 	if err != nil {
-		return []LastSetValue{}
+		return make([]LastSetValue, 0)
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
-	result := []LastSetValue{}
+	result := make([]LastSetValue, 0)
 	for rows.Next() {
 		var item LastSetValue
 		if err := rows.Scan(&item.SetNumber, &item.WeightKg, &item.Reps, &item.Rir, &item.SetType); err != nil {
@@ -548,7 +546,7 @@ func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	switch r.Method {
 	case http.MethodGet:
@@ -556,14 +554,14 @@ func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 		if userID == "" {
 			userID = "1"
 		}
-		rows, err := db.Query(`SELECT id, name FROM training_routines WHERE user_id = ? ORDER BY name COLLATE NOCASE ASC`, userID)
+		rows, err := db.Query(`SELECT id, name FROM training_routines WHERE user_id = ? ORDER BY name COLLATE NOCASE`, userID)
 		if err != nil {
 			http.Error(w, "Failed to fetch routines", http.StatusInternalServerError)
 			return
 		}
-		defer rows.Close()
+		defer closeRows(rows)
 
-		routines := []Routine{}
+		routines := make([]Routine, 0)
 		for rows.Next() {
 			var rt Routine
 			if err := rows.Scan(&rt.ID, &rt.Name); err != nil {
@@ -572,8 +570,7 @@ func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 			routines = append(routines, rt)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(routines)
+		writeJSON(w, http.StatusOK, routines)
 
 	case http.MethodDelete:
 		routineID := r.URL.Query().Get("id")
@@ -589,17 +586,17 @@ func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if _, err := tx.Exec(`UPDATE training_workouts SET routine_id = NULL WHERE routine_id = ?`, routineID); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to update workouts", http.StatusInternalServerError)
 			return
 		}
 		if _, err := tx.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ?`, routineID); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to delete routine exercises", http.StatusInternalServerError)
 			return
 		}
 		if _, err := tx.Exec(`DELETE FROM training_routines WHERE id = ?`, routineID); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to delete routine", http.StatusInternalServerError)
 			return
 		}
@@ -632,7 +629,7 @@ func handleAPILogSet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var exists bool
 	err = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM training_workout_sets WHERE workout_exercise_id = ? AND set_number = ?)`,
@@ -658,9 +655,7 @@ func handleAPILogSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `{"status": "success", "message": "Set logged/updated successfully"}`)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "Set logged/updated successfully"})
 }
 
 func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
@@ -684,10 +679,10 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	rows, err := db.Query(`
-       SELECT re.id, re.exercise_id, e.name, re.position
+       SELECT re.id, re.exercise_id, e.name, COALESCE(e.type, 'weight_reps'), re.position
        FROM training_routine_exercises re
        JOIN training_exercises e ON e.id = re.exercise_id
        WHERE re.routine_id = ?
@@ -697,33 +692,33 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exercises := []RoutineExercisePreview{}
+	exercises := make([]RoutineExercisePreview, 0)
 	for rows.Next() {
 		var ex RoutineExercisePreview
-		if err := rows.Scan(&ex.RoutineExerciseID, &ex.ExerciseID, &ex.Name, &ex.Position); err != nil {
+		if err := rows.Scan(&ex.RoutineExerciseID, &ex.ExerciseID, &ex.Name, &ex.Type, &ex.Position); err != nil {
 			continue
 		}
 
 		tRows, _ := db.Query(`SELECT set_number, set_type FROM training_routine_sets WHERE routine_exercise_id = ? ORDER BY set_number`, ex.RoutineExerciseID)
-		ex.TemplateSets = []RoutineSet{}
+		ex.TemplateSets = make([]RoutineSet, 0)
 		for tRows.Next() {
 			var ts RoutineSet
-			tRows.Scan(&ts.SetNumber, &ts.SetType)
-			ex.TemplateSets = append(ex.TemplateSets, ts)
+			if err := tRows.Scan(&ts.SetNumber, &ts.SetType); err == nil {
+				ex.TemplateSets = append(ex.TemplateSets, ts)
+			}
 		}
-		tRows.Close()
+		closeRows(tRows)
 
-		ex.LastSets = []LastSetValue{}
+		ex.LastSets = make([]LastSetValue, 0)
 		exercises = append(exercises, ex)
 	}
-	rows.Close()
+	closeRows(rows)
 
 	for i := range exercises {
 		exercises[i].LastSets = loadLastSetsByCompositeKey(db, userID, exercises[i].ExerciseID, 0)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(exercises)
+	writeJSON(w, http.StatusOK, exercises)
 }
 
 func handleAPIMobileDashboardVolume(w http.ResponseWriter, r *http.Request) {
@@ -757,10 +752,10 @@ func handleAPIMobileDashboardVolume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var query string
-	var args []interface{}
+	var args []any
 	baseQuery := `
        SELECT COALESCE(SUM(s.weight_kg * s.reps), 0)
        FROM training_workout_sets s
@@ -770,10 +765,10 @@ func handleAPIMobileDashboardVolume(w http.ResponseWriter, r *http.Request) {
 
 	if interval == "" {
 		query = baseQuery
-		args = []interface{}{userID}
+		args = []any{userID}
 	} else {
 		query = baseQuery + ` AND w.date >= datetime('now', ?)`
-		args = []interface{}{userID, interval}
+		args = []any{userID, interval}
 	}
 
 	var volume float64
@@ -782,8 +777,7 @@ func handleAPIMobileDashboardVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(VolumeResponse{VolumeKg: volume})
+	writeJSON(w, http.StatusOK, VolumeResponse{VolumeKg: volume})
 }
 
 func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
@@ -792,7 +786,7 @@ func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	switch r.Method {
 	case http.MethodGet:
@@ -801,121 +795,84 @@ func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
 			userID = "1"
 		}
 
-		// 1. Calculate PR counts per workout
-		prCountMap := make(map[int]int)
-
-		type exBench struct {
-			hasPrior     bool
-			maxWeight    float64
-			maxReps      int
-			maxSetVolume float64
+		type exBests struct {
+			maxW float64
+			maxR float64
+			maxV float64
 		}
-		benchmarks := make(map[int]*exBench)
+		exMap := make(map[int]*exBests)
+		prCountPerWorkout := make(map[int]int)
 
-		prRows, err := db.Query(`
-			SELECT 
-				w.id,
-				we.exercise_id,
-				COALESCE(s.weight_kg, 0),
-				COALESCE(s.reps, 0)
-			FROM training_workouts w
-			JOIN training_workout_exercises we ON we.workout_id = w.id
-			JOIN training_workout_sets s ON s.workout_exercise_id = we.id
-			WHERE w.user_id = ?
-			ORDER BY w.date ASC, w.id ASC, s.set_number ASC`, userID)
-		if err == nil {
-			for prRows.Next() {
-				var (
-					wID    int
-					exID   int
-					weight float64
-					reps   int
-				)
-				if errScan := prRows.Scan(&wID, &exID, &weight, &reps); errScan == nil {
-					b, exists := benchmarks[exID]
-					if !exists {
-						b = &exBench{}
-						benchmarks[exID] = b
+		setRows, setErr := db.Query(`
+           SELECT w.id, we.exercise_id, s.weight_kg, s.reps
+           FROM training_workout_sets s
+           JOIN training_workout_exercises we ON we.id = s.workout_exercise_id
+           JOIN training_workouts w ON w.id = we.workout_id
+           WHERE w.user_id = ?
+           ORDER BY w.date, w.id, we.position, s.set_number`, userID)
+		if setErr == nil {
+			for setRows.Next() {
+				var wID, exID, reps int
+				var wKg float64
+				if err := setRows.Scan(&wID, &exID, &wKg, &reps); err != nil {
+					continue
+				}
+				b, ok := exMap[exID]
+				if !ok {
+					b = &exBests{}
+					exMap[exID] = b
+				}
+				vol := wKg * float64(reps)
+				if reps > 0 || wKg > 0 {
+					if (wKg > 0 && wKg > b.maxW) || (reps > 0 && float64(reps) > b.maxR) || (vol > 0 && vol > b.maxV) {
+						prCountPerWorkout[wID]++
 					}
-
-					vol := weight * float64(reps)
-					isPr := false
-
-					if !b.hasPrior {
-						if weight > 0 || reps > 0 {
-							isPr = true
-							b.hasPrior = true
-							if weight > b.maxWeight {
-								b.maxWeight = weight
-							}
-							if reps > b.maxReps {
-								b.maxReps = reps
-							}
-							if vol > b.maxSetVolume {
-								b.maxSetVolume = vol
-							}
-						}
-					} else {
-						weightPr := weight > 0 && weight > b.maxWeight
-						repsPr := reps > 0 && reps > b.maxReps
-						volPr := vol > 0 && vol > b.maxSetVolume
-
-						if weightPr || repsPr || volPr {
-							isPr = true
-							if weight > b.maxWeight {
-								b.maxWeight = weight
-							}
-							if reps > b.maxReps {
-								b.maxReps = reps
-							}
-							if vol > b.maxSetVolume {
-								b.maxSetVolume = vol
-							}
-						}
+					if wKg > b.maxW {
+						b.maxW = wKg
 					}
-
-					if isPr {
-						prCountMap[wID]++
+					if float64(reps) > b.maxR {
+						b.maxR = float64(reps)
+					}
+					if vol > b.maxV {
+						b.maxV = vol
 					}
 				}
 			}
-			prRows.Close()
+			closeRows(setRows)
 		}
 
-		// 2. Query workouts with aggregated sets, reps and volume
 		rows, err := db.Query(`
-          SELECT 
-            w.id, 
-            w.date, 
-            COALESCE(r.name, 'Custom workout'),
-            COUNT(s.id) AS total_sets,
-            COALESCE(SUM(s.reps), 0) AS total_reps,
-            COALESCE(SUM(s.weight_kg * s.reps), 0) AS total_weight_kg
-          FROM training_workouts w
-          LEFT JOIN training_routines r ON r.id = w.routine_id
-          LEFT JOIN training_workout_exercises we ON we.workout_id = w.id
-          LEFT JOIN training_workout_sets s ON s.workout_exercise_id = we.id
-          WHERE w.user_id = ?
-          GROUP BY w.id
-          ORDER BY w.date DESC`, userID)
+           SELECT 
+              w.id, 
+              w.date, 
+              COALESCE(r.name, 'Custom workout'),
+              COALESCE(COUNT(s.id), 0) as total_sets,
+              COALESCE(SUM(s.reps), 0) as total_reps,
+              COALESCE(SUM(s.weight_kg * s.reps), 0) as total_weight_kg
+           FROM training_workouts w
+           LEFT JOIN training_routines r ON r.id = w.routine_id
+           LEFT JOIN training_workout_exercises we ON we.workout_id = w.id
+           LEFT JOIN training_workout_sets s ON s.workout_exercise_id = we.id
+           WHERE w.user_id = ?
+           GROUP BY w.id, w.date, r.name
+           ORDER BY w.date DESC, w.id DESC`, userID)
 		if err != nil {
 			http.Error(w, "Failed to fetch workouts", http.StatusInternalServerError)
 			return
 		}
-		defer rows.Close()
+		defer closeRows(rows)
 
-		workouts := []WorkoutSummary{}
+		workouts := make([]WorkoutSummary, 0)
 		for rows.Next() {
 			var ws WorkoutSummary
 			if err := rows.Scan(&ws.WorkoutID, &ws.Date, &ws.RoutineName, &ws.TotalSets, &ws.TotalReps, &ws.TotalWeightKg); err != nil {
 				continue
 			}
-			ws.PrCount = prCountMap[ws.WorkoutID]
+			ws.PrCount = prCountPerWorkout[ws.WorkoutID]
 			workouts = append(workouts, ws)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(workouts)
+		writeJSON(w, http.StatusOK, workouts)
 
 	case http.MethodDelete:
 		workoutID := r.URL.Query().Get("id")
@@ -935,17 +892,17 @@ func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
           WHERE workout_exercise_id IN (
              SELECT id FROM training_workout_exercises WHERE workout_id = ?
           )`, workoutID); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to delete sets", http.StatusInternalServerError)
 			return
 		}
 		if _, err := tx.Exec(`DELETE FROM training_workout_exercises WHERE workout_id = ?`, workoutID); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to delete workout exercises", http.StatusInternalServerError)
 			return
 		}
 		if _, err := tx.Exec(`DELETE FROM training_workouts WHERE id = ?`, workoutID); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to delete workout", http.StatusInternalServerError)
 			return
 		}
@@ -977,7 +934,7 @@ func handleAPIReorderExercises(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -989,7 +946,7 @@ func handleAPIReorderExercises(w http.ResponseWriter, r *http.Request) {
           UPDATE training_routine_exercises
           SET position = ?
           WHERE routine_id = ? AND exercise_id = ?`, p.Position, req.RoutineID, p.ExerciseID); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to update positions", http.StatusInternalServerError)
 			return
 		}
@@ -1018,7 +975,7 @@ func handleAPIWorkoutReorderExercises(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -1030,7 +987,7 @@ func handleAPIWorkoutReorderExercises(w http.ResponseWriter, r *http.Request) {
           UPDATE training_workout_exercises
           SET position = ?
           WHERE workout_id = ? AND exercise_id = ?`, p.Position, req.WorkoutID, p.ExerciseID); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to update positions", http.StatusInternalServerError)
 			return
 		}
@@ -1059,7 +1016,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	res, err := db.Exec(`INSERT INTO training_workouts (user_id, routine_id) VALUES (?, ?)`, req.UserID, req.RoutineID)
 	if err != nil {
@@ -1069,7 +1026,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	workoutID, _ := res.LastInsertId()
 
 	rows, err := db.Query(`
-    SELECT re.id, re.exercise_id, e.name, COALESCE(e.type, 'Weight & Reps'), re.position
+    SELECT re.id, re.exercise_id, e.name, COALESCE(e.type, 'weight_reps'), re.position
     FROM training_routine_exercises re
     JOIN training_exercises e ON e.id = re.exercise_id
     WHERE re.routine_id = ?
@@ -1094,9 +1051,9 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 		}
 		routineExercises = append(routineExercises, re)
 	}
-	rows.Close()
+	closeRows(rows)
 
-	exercises := []ExerciseInfo{}
+	exercises := make([]ExerciseInfo, 0)
 	for _, re := range routineExercises {
 		weRes, err := db.Exec(`INSERT INTO training_workout_exercises (workout_id, exercise_id, position) VALUES (?, ?, ?)`, workoutID, re.exerciseID, re.position)
 		if err != nil {
@@ -1104,8 +1061,8 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 		}
 		weID, _ := weRes.LastInsertId()
 
-		tSets := []RoutineSet{}
-		tRows, errSets := db.Query(`SELECT set_number, set_type FROM training_routine_sets WHERE routine_exercise_id = ? ORDER BY set_number ASC`, re.id)
+		tSets := make([]RoutineSet, 0)
+		tRows, errSets := db.Query(`SELECT set_number, set_type FROM training_routine_sets WHERE routine_exercise_id = ? ORDER BY set_number`, re.id)
 		if errSets == nil {
 			for tRows.Next() {
 				var ts RoutineSet
@@ -1113,7 +1070,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 					tSets = append(tSets, ts)
 				}
 			}
-			tRows.Close()
+			closeRows(tRows)
 		}
 
 		lSets := loadLastSetsByCompositeKey(db, req.UserID, re.exerciseID, int(workoutID))
@@ -1129,8 +1086,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(StartWorkoutResponse{
+	writeJSON(w, http.StatusOK, StartWorkoutResponse{
 		WorkoutID: int(workoutID),
 		RoutineID: req.RoutineID,
 		Exercises: exercises,
@@ -1148,16 +1104,16 @@ func handleAPIExercisesList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	rows, err := db.Query(`SELECT id, name, type, equipment FROM training_exercises ORDER BY name`)
 	if err != nil {
 		http.Error(w, "Query error", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
-	var exercises []ExerciseItem
+	exercises := make([]ExerciseItem, 0)
 	for rows.Next() {
 		var ex ExerciseItem
 		if err := rows.Scan(&ex.ID, &ex.Name, &ex.Type, &ex.Equipment); err == nil {
@@ -1165,8 +1121,7 @@ func handleAPIExercisesList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(exercises)
+	writeJSON(w, http.StatusOK, exercises)
 }
 
 func handleAPIExerciseCreate(w http.ResponseWriter, r *http.Request) {
@@ -1191,7 +1146,7 @@ func handleAPIExerciseCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	res, err := db.Exec(`INSERT INTO training_exercises (name, type, equipment) VALUES (?, ?, ?)`,
 		strings.TrimSpace(req.Name), strings.TrimSpace(req.Type), strings.TrimSpace(req.Equipment))
@@ -1202,9 +1157,7 @@ func handleAPIExerciseCreate(w http.ResponseWriter, r *http.Request) {
 
 	newID, _ := res.LastInsertId()
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(ExerciseItem{
+	writeJSON(w, http.StatusCreated, ExerciseItem{
 		ID:        int(newID),
 		Name:      req.Name,
 		Type:      req.Type,
@@ -1213,7 +1166,7 @@ func handleAPIExerciseCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAPIExerciseUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -1225,7 +1178,7 @@ func handleAPIExerciseUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.ID <= 0 || strings.TrimSpace(req.Name) == "" {
-		http.Error(w, "Exercise ID and Name cannot be empty", http.StatusBadRequest)
+		http.Error(w, "Exercise ID and name are required", http.StatusBadRequest)
 		return
 	}
 
@@ -1234,7 +1187,7 @@ func handleAPIExerciseUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	_, err = db.Exec(`UPDATE training_exercises SET name = ?, type = ?, equipment = ? WHERE id = ?`,
 		strings.TrimSpace(req.Name), strings.TrimSpace(req.Type), strings.TrimSpace(req.Equipment), req.ID)
@@ -1243,13 +1196,7 @@ func handleAPIExerciseUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ExerciseItem{
-		ID:        req.ID,
-		Name:      strings.TrimSpace(req.Name),
-		Type:      strings.TrimSpace(req.Type),
-		Equipment: strings.TrimSpace(req.Equipment),
-	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func handleAPIRoutineExerciseAdd(w http.ResponseWriter, r *http.Request) {
@@ -1269,7 +1216,7 @@ func handleAPIRoutineExerciseAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -1283,7 +1230,7 @@ func handleAPIRoutineExerciseAdd(w http.ResponseWriter, r *http.Request) {
 	res, err := tx.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`,
 		req.RoutineID, req.ExerciseID, maxPos+1)
 	if err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		http.Error(w, "Failed to add exercise", http.StatusInternalServerError)
 		return
 	}
@@ -1293,7 +1240,7 @@ func handleAPIRoutineExerciseAdd(w http.ResponseWriter, r *http.Request) {
 	for s := 1; s <= 3; s++ {
 		_, err = tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, 'standard')`, newReID, s)
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to insert default routine sets", http.StatusInternalServerError)
 			return
 		}
@@ -1321,7 +1268,7 @@ func handleAPIRoutineExerciseRemove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	_, err = db.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ? AND exercise_id = ?`, routineID, exerciseID)
 	if err != nil {
@@ -1348,7 +1295,7 @@ func handleAPIRoutineCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	_, err = db.Exec(`INSERT INTO training_routines (user_id, name) VALUES (?, ?)`, req.UserID, req.Name)
 	if err != nil {
@@ -1375,7 +1322,7 @@ func handleAPIWorkoutExerciseAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var maxPos int
 	_ = db.QueryRow(`SELECT COALESCE(MAX(position), 0) FROM training_workout_exercises WHERE workout_id = ?`, req.WorkoutID).Scan(&maxPos)
@@ -1390,7 +1337,7 @@ func handleAPIWorkoutExerciseAdd(w http.ResponseWriter, r *http.Request) {
 	weID, _ := res.LastInsertId()
 
 	var exName, exType string
-	_ = db.QueryRow(`SELECT name, COALESCE(type, 'Weight & Reps') FROM training_exercises WHERE id = ?`, req.ExerciseID).Scan(&exName, &exType)
+	_ = db.QueryRow(`SELECT name, COALESCE(type, 'weight_reps') FROM training_exercises WHERE id = ?`, req.ExerciseID).Scan(&exName, &exType)
 
 	newExercise := ExerciseInfo{
 		WorkoutExerciseID: int(weID),
@@ -1398,10 +1345,11 @@ func handleAPIWorkoutExerciseAdd(w http.ResponseWriter, r *http.Request) {
 		Name:              exName,
 		Type:              exType,
 		Position:          maxPos + 1,
+		TemplateSets:      make([]RoutineSet, 0),
+		LastSets:          make([]LastSetValue, 0),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(newExercise)
+	writeJSON(w, http.StatusOK, newExercise)
 }
 
 func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
@@ -1421,121 +1369,51 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var resp WorkoutDetailResponse
-
-	var (
-		userID      string
-		workoutDate string
-	)
+	var workoutUserID int
+	var workoutDate string
 
 	err = db.QueryRow(`
        SELECT id, user_id, date, COALESCE((SELECT name FROM training_routines WHERE id = routine_id), 'Custom workout') 
-       FROM training_workouts WHERE id = ?`, workoutID).Scan(&resp.WorkoutID, &userID, &workoutDate, &resp.RoutineName)
+       FROM training_workouts WHERE id = ?`, workoutID).Scan(&resp.WorkoutID, &workoutUserID, &workoutDate, &resp.RoutineName)
+	resp.Date = workoutDate
 
 	if err != nil {
 		http.Error(w, "Workout not found", http.StatusNotFound)
 		return
 	}
-	resp.Date = workoutDate
 
-	// Pre-calculate PR sets up to and including this workout
-	prSetIDs := make(map[int]bool)
-	type exBench struct {
-		hasPrior     bool
-		maxWeight    float64
-		maxReps      int
-		maxSetVolume float64
-	}
-	benchmarks := make(map[int]*exBench)
-
-	prRows, errPr := db.Query(`
-		SELECT 
-			s.id,
-			w.id,
-			we.exercise_id,
-			COALESCE(s.weight_kg, 0),
-			COALESCE(s.reps, 0)
-		FROM training_workouts w
-		JOIN training_workout_exercises we ON we.workout_id = w.id
-		JOIN training_workout_sets s ON s.workout_exercise_id = we.id
-		WHERE w.user_id = ?
-		  AND (w.date < ? OR (w.date = ? AND w.id <= ?))
-		ORDER BY w.date ASC, w.id ASC, s.set_number ASC`, userID, workoutDate, workoutDate, resp.WorkoutID)
-	if errPr == nil {
-		for prRows.Next() {
-			var (
-				sID    int
-				wID    int
-				exID   int
-				weight float64
-				reps   int
-			)
-			if errScan := prRows.Scan(&sID, &wID, &exID, &weight, &reps); errScan == nil {
-				b, exists := benchmarks[exID]
-				if !exists {
-					b = &exBench{}
-					benchmarks[exID] = b
-				}
-
-				vol := weight * float64(reps)
-				isPr := false
-
-				if !b.hasPrior {
-					if weight > 0 || reps > 0 {
-						isPr = true
-						b.hasPrior = true
-						if weight > b.maxWeight {
-							b.maxWeight = weight
-						}
-						if reps > b.maxReps {
-							b.maxReps = reps
-						}
-						if vol > b.maxSetVolume {
-							b.maxSetVolume = vol
-						}
-					}
-				} else {
-					weightPr := weight > 0 && weight > b.maxWeight
-					repsPr := reps > 0 && reps > b.maxReps
-					volPr := vol > 0 && vol > b.maxSetVolume
-
-					if weightPr || repsPr || volPr {
-						isPr = true
-						if weight > b.maxWeight {
-							b.maxWeight = weight
-						}
-						if reps > b.maxReps {
-							b.maxReps = reps
-						}
-						if vol > b.maxSetVolume {
-							b.maxSetVolume = vol
-						}
-					}
-				}
-
-				if isPr && wID == resp.WorkoutID {
-					prSetIDs[sID] = true
-				}
-			}
-		}
-		prRows.Close()
-	}
-
-	resp.Exercises = []WorkoutDetailExercise{}
+	resp.Exercises = make([]WorkoutDetailExercise, 0)
 
 	rows, err := db.Query(`
-       SELECT we.id, we.exercise_id, e.name, we.position 
+       SELECT we.id, we.exercise_id, e.name, COALESCE(e.type, 'weight_reps'), we.position 
        FROM training_workout_exercises we 
        JOIN training_exercises e ON e.id = we.exercise_id 
        WHERE we.workout_id = ? ORDER BY we.position`, workoutID)
 	if err == nil {
-		defer rows.Close()
+		defer closeRows(rows)
 		for rows.Next() {
 			var ex WorkoutDetailExercise
-			rows.Scan(&ex.WorkoutExerciseID, &ex.ExerciseID, &ex.Name, &ex.Position)
-			ex.Sets = []WorkoutDetailSet{}
+			if err := rows.Scan(&ex.WorkoutExerciseID, &ex.ExerciseID, &ex.Name, &ex.Type, &ex.Position); err != nil {
+				continue
+			}
+			ex.Sets = make([]WorkoutDetailSet, 0)
+
+			// Determine PRs: get prior bests for this user and this exercise prior to this workout
+			var maxPriorW, maxPriorR, maxPriorV float64
+			_ = db.QueryRow(`
+                SELECT 
+                   COALESCE(MAX(s.weight_kg), 0),
+                   COALESCE(MAX(s.reps), 0),
+                   COALESCE(MAX(s.weight_kg * s.reps), 0)
+                FROM training_workout_sets s
+                JOIN training_workout_exercises we2 ON we2.id = s.workout_exercise_id
+                JOIN training_workouts w2 ON w2.id = we2.workout_id
+                WHERE w2.user_id = ? AND we2.exercise_id = ? 
+                  AND (w2.date < ? OR (w2.date = ? AND w2.id < ?))`,
+				workoutUserID, ex.ExerciseID, workoutDate, workoutDate, workoutID).Scan(&maxPriorW, &maxPriorR, &maxPriorV)
 
 			setRows, errSet := db.Query(`
              SELECT id, set_number, weight_kg, reps, rir, set_type 
@@ -1544,18 +1422,35 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 			if errSet == nil {
 				for setRows.Next() {
 					var s WorkoutDetailSet
-					setRows.Scan(&s.SetID, &s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir, &s.SetType)
-					s.IsPr = prSetIDs[s.SetID]
+					if err := setRows.Scan(&s.SetID, &s.SetNumber, &s.WeightKg, &s.Reps, &s.Rir, &s.SetType); err != nil {
+						continue
+					}
+					vol := s.WeightKg * float64(s.Reps)
+					if s.Reps > 0 || s.WeightKg > 0 {
+						if (s.WeightKg > 0 && s.WeightKg > maxPriorW) ||
+							(s.Reps > 0 && float64(s.Reps) > maxPriorR) ||
+							(vol > 0 && vol > maxPriorV) {
+							s.IsPr = true
+						}
+						if s.WeightKg > maxPriorW {
+							maxPriorW = s.WeightKg
+						}
+						if float64(s.Reps) > maxPriorR {
+							maxPriorR = float64(s.Reps)
+						}
+						if vol > maxPriorV {
+							maxPriorV = vol
+						}
+					}
 					ex.Sets = append(ex.Sets, s)
 				}
-				setRows.Close()
+				closeRows(setRows)
 			}
 			resp.Exercises = append(resp.Exercises, ex)
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func handleAPIUpdateRoutineSets(w http.ResponseWriter, r *http.Request) {
@@ -1573,7 +1468,7 @@ func handleAPIUpdateRoutineSets(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -1599,14 +1494,31 @@ func handleAPISyncRoutineFromWorkout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	db, _ := sql.Open("sqlite", dbPath)
-	defer db.Close()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer closeDB(db)
 
-	tx, _ := db.Begin()
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
 
-	tx.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ?`, req.RoutineID)
+	if _, err := tx.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ?`, req.RoutineID); err != nil {
+		_ = tx.Rollback()
+		http.Error(w, "Failed to clear routine exercises", http.StatusInternalServerError)
+		return
+	}
 
-	rows, _ := tx.Query(`SELECT id, exercise_id, position FROM training_workout_exercises WHERE workout_id = ? ORDER BY position`, req.WorkoutID)
+	rows, err := tx.Query(`SELECT id, exercise_id, position FROM training_workout_exercises WHERE workout_id = ? ORDER BY position`, req.WorkoutID)
+	if err != nil {
+		_ = tx.Rollback()
+		http.Error(w, "Failed to query workout exercises", http.StatusInternalServerError)
+		return
+	}
 	type wEx struct {
 		id   int
 		exID int
@@ -1615,26 +1527,37 @@ func handleAPISyncRoutineFromWorkout(w http.ResponseWriter, r *http.Request) {
 	var wExercises []wEx
 	for rows.Next() {
 		var we wEx
-		rows.Scan(&we.id, &we.exID, &we.pos)
+		if err := rows.Scan(&we.id, &we.exID, &we.pos); err != nil {
+			continue
+		}
 		wExercises = append(wExercises, we)
 	}
-	rows.Close()
+	closeRows(rows)
 
 	for _, we := range wExercises {
-		res, _ := tx.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`, req.RoutineID, we.exID, we.pos)
+		res, err := tx.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`, req.RoutineID, we.exID, we.pos)
+		if err != nil {
+			continue
+		}
 		newReID, _ := res.LastInsertId()
 
-		setRows, _ := tx.Query(`SELECT set_number, set_type FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, we.id)
-		for setRows.Next() {
-			var sNum int
-			var sType string
-			setRows.Scan(&sNum, &sType)
-			tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, ?)`, newReID, sNum, sType)
+		setRows, err := tx.Query(`SELECT set_number, set_type FROM training_workout_sets WHERE workout_exercise_id = ? ORDER BY set_number`, we.id)
+		if err == nil {
+			for setRows.Next() {
+				var sNum int
+				var sType string
+				if err := setRows.Scan(&sNum, &sType); err == nil {
+					_, _ = tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, ?)`, newReID, sNum, sType)
+				}
+			}
+			closeRows(setRows)
 		}
-		setRows.Close()
 	}
 
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit routine sync", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1670,7 +1593,7 @@ func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var resp ExerciseDetailAnalytics
 	err = db.QueryRow(`SELECT id, name, type, equipment FROM training_exercises WHERE id = ?`, exerciseID).
@@ -1691,13 +1614,13 @@ func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
        JOIN training_workout_sets s ON s.workout_exercise_id = we.id
        WHERE we.exercise_id = ? AND w.user_id = ?`
 
-	var args []interface{}
+	var args []any
 	if interval == "" {
-		query += ` GROUP BY w.id HAVING total_vol > 0 ORDER BY w.date ASC, w.id ASC`
-		args = []interface{}{exerciseID, userID}
+		query += ` GROUP BY w.id, w.date HAVING SUM(s.weight_kg * s.reps) > 0 ORDER BY w.date, w.id`
+		args = []any{exerciseID, userID}
 	} else {
-		query += ` AND w.date >= datetime('now', ?) GROUP BY w.id HAVING total_vol > 0 ORDER BY w.date ASC, w.id ASC`
-		args = []interface{}{exerciseID, userID, interval}
+		query += ` AND w.date >= datetime('now', ?) GROUP BY w.id, w.date HAVING SUM(s.weight_kg * s.reps) > 0 ORDER BY w.date, w.id`
+		args = []any{exerciseID, userID, interval}
 	}
 
 	rows, err := db.Query(query, args...)
@@ -1705,9 +1628,9 @@ func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Query execution error", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
-	resp.History = []ExerciseHistoryPoint{}
+	resp.History = make([]ExerciseHistoryPoint, 0)
 	for rows.Next() {
 		var pt ExerciseHistoryPoint
 		if err := rows.Scan(&pt.Date, &pt.MaxWeight, &pt.EstOneRM, &pt.Volume); err == nil {
@@ -1715,8 +1638,7 @@ func handleAPIExerciseAnalytics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
@@ -1736,7 +1658,7 @@ func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var resp RoutineAnalyticsResponse
 	var createdAt string
@@ -1757,16 +1679,16 @@ func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
        JOIN training_workout_exercises we ON we.workout_id = w.id
        JOIN training_workout_sets s ON s.workout_exercise_id = we.id
        WHERE w.routine_id = ? AND w.user_id = ?
-       GROUP BY w.id
-       HAVING total_volume > 0
-       ORDER BY w.date ASC, w.id ASC`, routineID, userID)
+       GROUP BY w.id, w.date
+       HAVING SUM(s.weight_kg * s.reps) > 0
+       ORDER BY w.date, w.id`, routineID, userID)
 	if err != nil {
 		http.Error(w, "Query error", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
-	resp.History = []RoutineHistoryPoint{}
+	resp.History = make([]RoutineHistoryPoint, 0)
 	for rows.Next() {
 		var pt RoutineHistoryPoint
 		if err := rows.Scan(&pt.WorkoutID, &pt.Date, &pt.VolumeKg, &pt.TotalReps); err == nil {
@@ -1783,8 +1705,7 @@ func handleAPIRoutineAnalytics(w http.ResponseWriter, r *http.Request) {
 		resp.History = append([]RoutineHistoryPoint{zeroPoint}, resp.History...)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
@@ -1804,7 +1725,7 @@ func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -1817,13 +1738,13 @@ func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
        WHERE workout_exercise_id IN (
           SELECT id FROM training_workout_exercises WHERE workout_id = ?
        )`, req.WorkoutID); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		http.Error(w, "Failed to clean old sets", http.StatusInternalServerError)
 		return
 	}
 
 	if _, err := tx.Exec(`DELETE FROM training_workout_exercises WHERE workout_id = ?`, req.WorkoutID); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		http.Error(w, "Failed to clean old exercises", http.StatusInternalServerError)
 		return
 	}
@@ -1833,7 +1754,7 @@ func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
           INSERT INTO training_workout_exercises (workout_id, exercise_id, position) 
           VALUES (?, ?, ?)`, req.WorkoutID, ex.ExerciseID, exPos+1)
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to insert workout exercise", http.StatusInternalServerError)
 			return
 		}
@@ -1845,7 +1766,7 @@ func handleAPIWorkoutUpdateDetails(w http.ResponseWriter, r *http.Request) {
              VALUES (?, ?, ?, ?, ?, ?)`,
 				newWeID, sPos+1, s.WeightKg, s.Reps, s.Rir, normalizeSetType(s.SetType))
 			if err != nil {
-				tx.Rollback()
+				_ = tx.Rollback()
 				http.Error(w, "Failed to insert workout set", http.StatusInternalServerError)
 				return
 			}
@@ -1866,7 +1787,7 @@ func handleAPIUserPlates(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
@@ -1874,22 +1795,21 @@ func handleAPIUserPlates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
-		rows, err := db.Query(`SELECT weight_kg, count FROM user_plates WHERE user_id = ? ORDER BY weight_kg ASC`, userID)
+		rows, err := db.Query(`SELECT weight_kg, count FROM user_plates WHERE user_id = ? ORDER BY weight_kg`, userID)
 		if err != nil {
 			http.Error(w, "Database query error", http.StatusInternalServerError)
 			return
 		}
-		defer rows.Close()
+		defer closeRows(rows)
 
-		var plates []UserPlate
+		plates := make([]UserPlate, 0)
 		for rows.Next() {
 			var p UserPlate
 			if err := rows.Scan(&p.WeightKg, &p.Count); err == nil {
 				plates = append(plates, p)
 			}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(plates)
+		writeJSON(w, http.StatusOK, plates)
 		return
 	}
 
@@ -1912,7 +1832,7 @@ func handleAPIUserPlates(w http.ResponseWriter, r *http.Request) {
 				_, _ = tx.Exec(`INSERT INTO user_plates (user_id, weight_kg, count) VALUES (?, ?, ?)`, req.UserID, p.WeightKg, p.Count)
 			}
 		}
-		tx.Commit()
+		_ = tx.Commit()
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -1926,7 +1846,7 @@ func handleAPIUserAlgorithms(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	_, _ = db.Exec(`ALTER TABLE user_algorithm_settings ADD COLUMN show_rir INTEGER NOT NULL DEFAULT 1`)
 
@@ -1948,18 +1868,17 @@ func handleAPIUserAlgorithms(w http.ResponseWriter, r *http.Request) {
 
 		var showRirInt int
 		err := db.QueryRow(`
-          SELECT warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage, COALESCE(show_rir, 1)
+          SELECT warmup_enabled, warmup_base, drop_enabled, drop_percentage, backoff_enabled, backoff_percentage, show_rir
           FROM user_algorithm_settings WHERE user_id = ?`, userID).
 			Scan(&s.WarmupEnabled, &s.WarmupBase, &s.DropEnabled, &s.DropPercentage, &s.BackoffEnabled, &s.BackoffPercentage, &showRirInt)
 
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "Database query error", http.StatusInternalServerError)
 			return
 		}
-		s.ShowRIR = (showRirInt == 1)
+		s.ShowRIR = showRirInt == 1
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(s)
+		writeJSON(w, http.StatusOK, s)
 		return
 	}
 
@@ -2013,22 +1932,22 @@ func handleGetConsistencyStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	query := `
        SELECT DISTINCT date(date)
        FROM training_workouts
        WHERE date >= date('now', '-120 days')
-       ORDER BY date(date) ASC
+       ORDER BY date(date)
     `
 	rows, err := db.Query(query)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
-	var dates []string
+	dates := make([]string, 0)
 	for rows.Next() {
 		var d string
 		if err := rows.Scan(&d); err == nil {
@@ -2036,8 +1955,7 @@ func handleGetConsistencyStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ConsistencyStatsResponse{
+	writeJSON(w, http.StatusOK, ConsistencyStatsResponse{
 		WorkoutDates: dates,
 	})
 }
@@ -2058,20 +1976,20 @@ func handleAPIUserWeightHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	rows, err := db.Query(`
        SELECT date, weight_kg 
        FROM user_daily_metrics 
        WHERE user_id = ? AND weight_kg IS NOT NULL AND weight_kg > 0 
-       ORDER BY date ASC`, userID)
+       ORDER BY date`, userID)
 	if err != nil {
 		http.Error(w, "Query error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
-	history := []WeightHistoryPoint{}
+	history := make([]WeightHistoryPoint, 0)
 	for rows.Next() {
 		var pt WeightHistoryPoint
 		if err := rows.Scan(&pt.Date, &pt.WeightKg); err == nil {
@@ -2079,8 +1997,7 @@ func handleAPIUserWeightHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(history)
+	writeJSON(w, http.StatusOK, history)
 }
 
 func handleAPIGetDailyMetricsToday(w http.ResponseWriter, r *http.Request) {
@@ -2099,7 +2016,7 @@ func handleAPIGetDailyMetricsToday(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var resp DailyMetricsTodayResp
 	resp.Date = ""
@@ -2110,15 +2027,14 @@ func handleAPIGetDailyMetricsToday(w http.ResponseWriter, r *http.Request) {
        WHERE user_id = ? AND date = date('now')`, userID).
 		Scan(&resp.Date, &resp.WeightKg)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		_ = db.QueryRow(`SELECT date('now')`).Scan(&resp.Date)
 	} else if err != nil {
 		http.Error(w, "Query error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // -------------------------------------------------------------
@@ -2131,14 +2047,7 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
-
-	// Upewnij się, że kolumny istnieją
-	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN strategy_targets TEXT`)
-	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN target_kcal REAL`)
-	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN target_protein REAL`)
-	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN target_fat REAL`)
-	_, _ = db.Exec(`ALTER TABLE user_diet_settings ADD COLUMN target_carbs REAL`)
+	defer closeDB(db)
 
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
@@ -2146,7 +2055,7 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
-		kcal, p, f, c, curWeight, height, goal, targetWeight, allStrategies := calculateDynamicTargets(db, userID, "now")
+		kcal, p, f, c, curWeight, height, goal, targetWeight := calculateDynamicTargets(db, userID, "now")
 
 		resp := UserDietSettingsModel{
 			UserID:          1,
@@ -2158,11 +2067,19 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 			TargetProtein:   p,
 			TargetFat:       f,
 			TargetCarbs:     c,
-			StrategyTargets: allStrategies,
+			StrategyTargets: make(map[string]MacroTargets),
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		var stratJSON sql.NullString
+		_ = db.QueryRow(`SELECT strategy_targets FROM user_diet_settings WHERE user_id = ?`, userID).Scan(&stratJSON)
+		if stratJSON.Valid && strings.TrimSpace(stratJSON.String) != "" {
+			_ = json.Unmarshal([]byte(stratJSON.String), &resp.StrategyTargets)
+		}
+		if resp.StrategyTargets == nil {
+			resp.StrategyTargets = make(map[string]MacroTargets)
+		}
+
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
@@ -2194,36 +2111,7 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
 				req.UserID, req.CurrentWeightKg)
 		}
 
-		// Ustal cele dla wybranego celu z StrategyTargets jeśli podane
-		if req.StrategyTargets != nil {
-			if st, ok := req.StrategyTargets[req.Goal]; ok && st.Kcal > 0 {
-				req.TargetKcal = st.Kcal
-				req.TargetProtein = st.Protein
-				req.TargetFat = st.Fat
-				req.TargetCarbs = st.Carbs
-			}
-		}
-
-		var strategyTargetsJSON interface{}
-		if req.StrategyTargets != nil && len(req.StrategyTargets) > 0 {
-			if bytes, err := json.Marshal(req.StrategyTargets); err == nil {
-				strategyTargetsJSON = string(bytes)
-			}
-		}
-
-		var tKcal, tProtein, tFat, tCarbs interface{}
-		if req.TargetKcal > 0 {
-			tKcal = req.TargetKcal
-		}
-		if req.TargetProtein > 0 {
-			tProtein = req.TargetProtein
-		}
-		if req.TargetFat > 0 {
-			tFat = req.TargetFat
-		}
-		if req.TargetCarbs > 0 {
-			tCarbs = req.TargetCarbs
-		}
+		stratBytes, _ := json.Marshal(req.StrategyTargets)
 
 		_, err = tx.Exec(`
           INSERT INTO user_diet_settings (user_id, height_cm, target_weight_kg, goal, target_kcal, target_protein, target_fat, target_carbs, strategy_targets, updated_at)
@@ -2238,10 +2126,10 @@ func handleAPIUserDietSettings(w http.ResponseWriter, r *http.Request) {
              target_carbs = excluded.target_carbs,
              strategy_targets = excluded.strategy_targets,
              updated_at = datetime('now')`,
-			req.UserID, req.HeightCm, req.TargetWeightKg, req.Goal, tKcal, tProtein, tFat, tCarbs, strategyTargetsJSON)
+			req.UserID, req.HeightCm, req.TargetWeightKg, req.Goal, req.TargetKcal, req.TargetProtein, req.TargetFat, req.TargetCarbs, string(stratBytes))
 
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			http.Error(w, "Failed to save diet settings: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -2265,18 +2153,18 @@ func handleAPIDietProducts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	rows, err := db.Query(`
        SELECT id, name, brand, barcode, package_weight, serving_size, kcal, protein, fat, carbs 
-       FROM diet_products ORDER BY name ASC`)
+       FROM diet_products ORDER BY name`)
 	if err != nil {
 		http.Error(w, "Failed to fetch products", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
-	products := []DietProductItem{}
+	products := make([]DietProductItem, 0)
 	for rows.Next() {
 		var p DietProductItem
 		if err := rows.Scan(&p.ID, &p.Name, &p.Brand, &p.Barcode, &p.PackageWeight, &p.ServingSize, &p.Kcal, &p.Protein, &p.Fat, &p.Carbs); err == nil {
@@ -2284,8 +2172,7 @@ func handleAPIDietProducts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(products)
+	writeJSON(w, http.StatusOK, products)
 }
 
 func handleAPIDietProductCreate(w http.ResponseWriter, r *http.Request) {
@@ -2310,7 +2197,7 @@ func handleAPIDietProductCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	res, err := db.Exec(`
        INSERT INTO diet_products (name, brand, barcode, package_weight, serving_size, kcal, protein, fat, carbs)
@@ -2323,9 +2210,7 @@ func handleAPIDietProductCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newID, _ := res.LastInsertId()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(DietProductItem{
+	writeJSON(w, http.StatusCreated, DietProductItem{
 		ID:            int(newID),
 		Name:          req.Name,
 		Brand:         req.Brand,
@@ -2359,16 +2244,16 @@ func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
-	targetKcal, targetP, targetF, targetC, _, _, _, _, _ := calculateDynamicTargets(db, userID, dateStr)
+	targetKcal, targetP, targetF, targetC, _, _, _, _ := calculateDynamicTargets(db, userID, dateStr)
 
 	var resp DailyDietSummaryResp
 	resp.TargetKcal = targetKcal
 	resp.TargetP = targetP
 	resp.TargetF = targetF
 	resp.TargetC = targetC
-	resp.Logs = []DietLogItem{}
+	resp.Logs = make([]DietLogItem, 0)
 
 	rows, err := db.Query(`
        SELECT 
@@ -2400,26 +2285,25 @@ func handleAPIDietDaySummary(w http.ResponseWriter, r *http.Request) {
        ORDER BY l.logged_at DESC, l.id DESC`, userID, dateStr)
 
 	if err == nil {
-		defer rows.Close()
+		defer closeRows(rows)
 		for rows.Next() {
-			var log DietLogItem
+			var item DietLogItem
 			var servSize *float64
-			if err := rows.Scan(&log.ID, &log.ProductID, &log.Name, &log.AmountG, &log.Kcal, &log.Protein, &log.Fat, &log.Carbs, &log.LoggedAt, &servSize); err == nil {
+			if err := rows.Scan(&item.ID, &item.ProductID, &item.Name, &item.AmountG, &item.Kcal, &item.Protein, &item.Fat, &item.Carbs, &item.LoggedAt, &servSize); err == nil {
 				if servSize != nil && *servSize > 0 {
-					val := log.AmountG / *servSize
-					log.ServingsCount = &val
+					val := item.AmountG / *servSize
+					item.ServingsCount = &val
 				}
-				resp.ConsumedKcal += log.Kcal
-				resp.ConsumedP += log.Protein
-				resp.ConsumedF += log.Fat
-				resp.ConsumedC += log.Carbs
-				resp.Logs = append(resp.Logs, log)
+				resp.ConsumedKcal += item.Kcal
+				resp.ConsumedP += item.Protein
+				resp.ConsumedF += item.Fat
+				resp.ConsumedC += item.Carbs
+				resp.Logs = append(resp.Logs, item)
 			}
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {
@@ -2443,7 +2327,7 @@ func handleAPIDietLog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	if req.Date != "" && req.Date != "now" {
 		_, err = db.Exec(`
@@ -2490,21 +2374,21 @@ func handleAPICustomDietLog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	var query string
-	var args []interface{}
+	var args []any
 
 	if req.Date != "" && req.Date != "now" {
 		query = `
           INSERT INTO diet_logs (user_id, product_id, custom_name, amount, kcal, protein, fat, carbs, logged_at) 
           VALUES (?, NULL, ?, 100.0, ?, ?, ?, ?, datetime(?, '12:00:00'))`
-		args = []interface{}{req.UserID, strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs, req.Date}
+		args = []any{req.UserID, strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs, req.Date}
 	} else {
 		query = `
           INSERT INTO diet_logs (user_id, product_id, custom_name, amount, kcal, protein, fat, carbs, logged_at) 
           VALUES (?, NULL, ?, 100.0, ?, ?, ?, ?, datetime('now'))`
-		args = []interface{}{req.UserID, strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs}
+		args = []any{req.UserID, strings.TrimSpace(req.Name), req.Kcal, req.Protein, req.Fat, req.Carbs}
 	}
 
 	if _, err := db.Exec(query, args...); err != nil {
@@ -2537,7 +2421,7 @@ func handleAPIUpdateDietLogAmount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	_, err = db.Exec(`UPDATE diet_logs SET amount = ? WHERE id = ?`, req.AmountG, req.LogID)
 	if err != nil {
@@ -2565,7 +2449,7 @@ func handleAPIDietLogDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	_, err = db.Exec(`DELETE FROM diet_logs WHERE id = ?`, logID)
 	if err != nil {
@@ -2587,7 +2471,7 @@ func handleGetDietConsistencyStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer closeDB(db)
 
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
@@ -2598,16 +2482,16 @@ func handleGetDietConsistencyStats(w http.ResponseWriter, r *http.Request) {
        SELECT DISTINCT date(logged_at)
        FROM diet_logs
        WHERE user_id = ? AND date(logged_at) >= date('now', '-120 days')
-       ORDER BY date(logged_at) ASC
+       ORDER BY date(logged_at)
     `
 	rows, err := db.Query(query, userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer closeRows(rows)
 
-	var dates []string
+	dates := make([]string, 0)
 	for rows.Next() {
 		var d string
 		if err := rows.Scan(&d); err == nil {
@@ -2615,8 +2499,7 @@ func handleGetDietConsistencyStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ConsistencyStatsResponse{
+	writeJSON(w, http.StatusOK, ConsistencyStatsResponse{
 		WorkoutDates: dates,
 	})
 }
