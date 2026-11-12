@@ -1,15 +1,19 @@
 package com.foss.app
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +25,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -34,6 +39,7 @@ import com.foss.app.navigation.BottomNavItem
 import com.foss.app.navigation.FossBottomNavBar
 import com.foss.app.screens.AutomationSettingsScreen
 import com.foss.app.screens.DashboardScreen
+import com.foss.app.notifications.RestTimerNotificationManager
 import com.foss.app.screens.DietScreen
 import com.foss.app.screens.DietSettingsScreen
 import com.foss.app.screens.EquipmentScreen
@@ -66,6 +72,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun FossApp() {
+    val context = LocalContext.current
     val navController = rememberNavController()
     val viewModel: AppViewModel = viewModel()
 
@@ -87,6 +94,16 @@ fun FossApp() {
         mutableLongStateOf(viewModel.activeWorkoutElapsedSeconds())
     }
     var showCancelActiveWorkoutDialog by remember { mutableStateOf(false) }
+
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     LaunchedEffect(activeWorkoutId, activeWorkoutStartedAt) {
         if (activeWorkoutId == null) {
@@ -181,7 +198,12 @@ fun FossApp() {
             }
 
             composable(BottomNavItem.Diet.route) {
-                DietScreen(viewModel = viewModel)
+                DietScreen(
+                    viewModel = viewModel,
+                    onWeightTrackingClick = {
+                        navController.navigate("dietSettings")
+                    }
+                )
             }
 
             composable(
@@ -289,11 +311,13 @@ fun FossApp() {
                         navController.navigate("exerciseDetail/$exerciseId")
                     },
                     onLeaveWorkout = {
+                        RestTimerNotificationManager.cancelTimer(context)
                         navController.navigate(BottomNavItem.Training.route) {
                             launchSingleTop = true
                         }
                     },
                     onFinish = {
+                        RestTimerNotificationManager.cancelTimer(context)
                         viewModel.resetWorkoutState()
                         navController.navigate(BottomNavItem.Training.route) {
                             popUpTo(BottomNavItem.Dashboard.route)
@@ -301,6 +325,7 @@ fun FossApp() {
                         }
                     },
                     onCancelWorkout = {
+                        RestTimerNotificationManager.cancelTimer(context)
                         navController.navigate(BottomNavItem.Training.route) {
                             popUpTo(BottomNavItem.Dashboard.route)
                             launchSingleTop = true
@@ -440,11 +465,12 @@ private fun ActiveWorkoutBanner(
     onCancel: () -> Unit
 ) {
     Surface(
-        tonalElevation = 6.dp,
-        shadowElevation = 4.dp,
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        color = MaterialTheme.colorScheme.background,
         modifier = Modifier
             .fillMaxWidth()
+            .border(width = 1.dp, color = MaterialTheme.colorScheme.outline)
             .clickable(onClick = onClick)
     ) {
         Row(

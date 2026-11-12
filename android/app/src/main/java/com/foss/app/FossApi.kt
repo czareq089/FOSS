@@ -32,7 +32,7 @@ interface FossApi {
     suspend fun startWorkout(@Body request: StartWorkoutRequest): Response<StartWorkoutResponse>
 
     @POST("/api/workouts/log")
-    suspend fun logSet(@Body request: SetLogRequest): Response<Unit>
+    suspend fun logSet(@Body request: SetLogRequest): Response<SetLogResponse>
 
     @GET("/api/workouts")
     suspend fun getWorkoutHistory(@Query("user_id") userId: Int = 1): Response<List<WorkoutSummary>>
@@ -66,6 +66,9 @@ interface FossApi {
 
     @POST("/api/routines/create")
     suspend fun createRoutine(@Body request: CreateRoutineReq): Response<Unit>
+
+    @POST("/api/routines/update")
+    suspend fun updateRoutine(@Body request: UpdateRoutineReq): Response<Unit>
 
     @POST("/api/workouts/exercises/add")
     suspend fun addExerciseToWorkout(@Body request: AddWorkoutExerciseReq): Response<ExerciseInfo>

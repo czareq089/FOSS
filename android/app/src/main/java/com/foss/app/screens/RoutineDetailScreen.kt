@@ -39,10 +39,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.foss.app.AppViewModel
 import com.foss.app.UiState
+import com.foss.app.models.ExerciseTrackingType
 import com.foss.app.models.ReorderPosition
 import com.foss.app.models.RoutineExercisePreview
 import com.foss.app.models.RoutineSet
+import com.foss.app.models.getExerciseTrackingType
 import com.foss.app.ui.theme.AccentBlue
+import com.foss.app.ui.theme.setTypeDisplay
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
@@ -86,6 +89,7 @@ fun RoutineDetailScreen(
         ?.data?.firstOrNull { it.id == routineId }?.name ?: "Routine"
 
     var editMode by remember { mutableStateOf(startInEditMode) }
+    var editedRoutineName by remember(routineName) { mutableStateOf(routineName) }
     val exercises = remember { mutableStateListOf<RoutineExercisePreview>() }
 
     LaunchedEffect(previewState) {
@@ -98,7 +102,25 @@ fun RoutineDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(routineName) },
+                title = {
+                    if (editMode) {
+                        OutlinedTextField(
+                            value = editedRoutineName,
+                            onValueChange = { editedRoutineName = it },
+                            singleLine = true,
+                            placeholder = { Text("Routine name") },
+                            textStyle = MaterialTheme.typography.titleMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(end = 8.dp)
+                        )
+                    } else {
+                        Text(routineName)
+                    }
+                },
                 navigationIcon = {
                     val backSource = remember { MutableInteractionSource() }
                     val isBackPressed by backSource.collectIsPressedAsState()
@@ -132,6 +154,11 @@ fun RoutineDetailScreen(
                             ) {
                                 if (editMode) {
                                     scope.launch {
+                                        val trimmedName = editedRoutineName.trim()
+                                        if (trimmedName.isNotBlank() && trimmedName != routineName) {
+                                            viewModel.updateRoutineName(routineId, trimmedName)
+                                        }
+
                                         val positions = exercises.mapIndexed { index, ex ->
                                             ReorderPosition(exerciseId = ex.exerciseId, position = index + 1)
                                         }
@@ -149,9 +176,11 @@ fun RoutineDetailScreen(
 
                                         viewModel.loadRoutineExercises(routineId)
                                         viewModel.loadRoutineAnalytics(routineId)
+                                        viewModel.loadRoutines()
                                         editMode = false
                                     }
                                 } else {
+                                    editedRoutineName = routineName
                                     editMode = true
                                 }
                             },
@@ -168,8 +197,12 @@ fun RoutineDetailScreen(
         },
         bottomBar = {
             if (!editMode) {
-                Surface(shadowElevation = 8.dp) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                Surface(
+                    shadowElevation = 8.dp,
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         Button(
                             onClick = {
                                 if (!isStartingWorkout) {
@@ -615,11 +648,27 @@ private fun ReorderableExerciseList(
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Spacer(Modifier.height(8.dp))
 
+                                val trackingType = getExerciseTrackingType(exercise.type)
+
                                 Row(modifier = Modifier.fillMaxWidth()) {
                                     Text("Set", modifier = Modifier.weight(0.6f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("Weight", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("RIR", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    when (trackingType) {
+                                        ExerciseTrackingType.WEIGHT_AND_REPS -> {
+                                            Text("Weight", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("RIR", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        ExerciseTrackingType.REPS_ONLY -> {
+                                            Text("Reps", modifier = Modifier.weight(3.2f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        ExerciseTrackingType.TIME_ONLY -> {
+                                            Text("Time", modifier = Modifier.weight(3.2f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        ExerciseTrackingType.TIME_AND_DISTANCE -> {
+                                            Text("Time", modifier = Modifier.weight(1.8f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("Distance (km)", modifier = Modifier.weight(1.4f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
                                     Spacer(modifier = Modifier.weight(0.5f))
                                 }
 
@@ -648,30 +697,68 @@ private fun ReorderableExerciseList(
                                                 .alpha(if (isTypePressed) 0.4f else 1f)
                                                 .padding(vertical = 8.dp)
                                         ) {
-                                            Text("${sIndex + 1}", color = typeColor, style = MaterialTheme.typography.titleMedium)
+                                            Text(setTypeDisplay(set.setType, sIndex + 1), color = typeColor, style = MaterialTheme.typography.titleMedium)
                                         }
 
-                                        OutlinedTextField(
-                                            value = "", onValueChange = {}, enabled = false,
-                                            placeholder = { Text("-", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
-                                            modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
-                                        OutlinedTextField(
-                                            value = "", onValueChange = {}, enabled = false,
-                                            placeholder = { Text("-", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
-                                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
-                                        OutlinedTextField(
-                                            value = "", onValueChange = {}, enabled = false,
-                                            placeholder = { Text("-", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
-                                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
+                                        when (trackingType) {
+                                            ExerciseTrackingType.WEIGHT_AND_REPS -> {
+                                                OutlinedTextField(
+                                                    value = "", onValueChange = {}, enabled = false,
+                                                    placeholder = { Text("-", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                                                    modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp),
+                                                    colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                )
+                                                OutlinedTextField(
+                                                    value = "", onValueChange = {}, enabled = false,
+                                                    placeholder = { Text("-", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                                                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                                                    colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                )
+                                                OutlinedTextField(
+                                                    value = "", onValueChange = {}, enabled = false,
+                                                    placeholder = { Text("-", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                                                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                                                    colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                )
+                                            }
+                                            ExerciseTrackingType.REPS_ONLY -> {
+                                                OutlinedTextField(
+                                                    value = "", onValueChange = {}, enabled = false,
+                                                    placeholder = { Text("- reps", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                                                    modifier = Modifier.weight(3.2f).padding(horizontal = 4.dp),
+                                                    colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                )
+                                            }
+                                            ExerciseTrackingType.TIME_ONLY -> {
+                                                OutlinedTextField(
+                                                    value = "", onValueChange = {}, enabled = false,
+                                                    placeholder = { Text("00:00", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                                                    modifier = Modifier.weight(3.2f).padding(horizontal = 4.dp),
+                                                    colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                )
+                                            }
+                                            ExerciseTrackingType.TIME_AND_DISTANCE -> {
+                                                OutlinedTextField(
+                                                    value = "", onValueChange = {}, enabled = false,
+                                                    placeholder = { Text("00:00", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                                                    modifier = Modifier.weight(1.8f).padding(horizontal = 4.dp),
+                                                    colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                )
+                                                OutlinedTextField(
+                                                    value = "", onValueChange = {}, enabled = false,
+                                                    placeholder = { Text("- km", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                                                    modifier = Modifier.weight(1.4f).padding(horizontal = 4.dp),
+                                                    colors = OutlinedTextFieldDefaults.colors(disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                )
+                                            }
+                                        }
 
                                         Box(modifier = Modifier.weight(0.5f), contentAlignment = Alignment.Center) {
                                             val removeSetSource = remember { MutableInteractionSource() }

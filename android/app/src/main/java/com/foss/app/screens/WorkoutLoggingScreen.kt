@@ -30,7 +30,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
@@ -41,7 +44,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import com.foss.app.ui.theme.setTypeColor
+import com.foss.app.ui.theme.setTypeDisplay
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -53,10 +58,16 @@ import androidx.compose.ui.zIndex
 import com.foss.app.AppViewModel
 import com.foss.app.UiState
 import com.foss.app.models.ExerciseInfo
+import com.foss.app.models.ExerciseTrackingType
 import com.foss.app.models.PlateCalculator
 import com.foss.app.models.ReorderPosition
+import com.foss.app.models.formatSecondsToTime
+import com.foss.app.models.getExerciseTrackingType
+import com.foss.app.models.parseTimeToSeconds
 import com.foss.app.models.UserAlgorithmSettings
 import com.foss.app.models.UserPlate
+import androidx.compose.ui.platform.LocalContext
+import com.foss.app.notifications.RestTimerNotificationManager
 import com.foss.app.ui.theme.AccentBlue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -70,6 +81,7 @@ class SetRowState(initialSetNumber: Int) {
     var confirmed by mutableStateOf(false)
     var submitting by mutableStateOf(false)
     var isPr by mutableStateOf(false)
+    var prLabel by mutableStateOf<String?>(null)
     var error by mutableStateOf<String?>(null)
     var autoFilled by mutableStateOf(true)
     var setType by mutableStateOf("standard")
@@ -77,6 +89,14 @@ class SetRowState(initialSetNumber: Int) {
     var fallbackWeight by mutableStateOf("")
     var fallbackReps by mutableStateOf("")
     var fallbackRir by mutableStateOf("")
+
+    var timeSeconds by mutableIntStateOf(0)
+    var timeInput by mutableStateOf("")
+    var isStopwatchRunning by mutableStateOf(false)
+    var distanceKm by mutableStateOf("")
+
+    var fallbackTimeSeconds by mutableIntStateOf(0)
+    var fallbackDistanceKm by mutableStateOf("")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -105,9 +125,31 @@ fun WorkoutLoggingScreen(
     val workoutStartedAt = viewModel.activeWorkoutStartedAtMillis.value
     var elapsedSeconds by remember(workoutId) { mutableLongStateOf(viewModel.activeWorkoutElapsedSeconds()) }
 
+    var activeSetRowForType by remember { mutableStateOf<SetRowState?>(null) }
+    var activeExerciseForTimer by remember { mutableStateOf<ExerciseInfo?>(null) }
+    var activeExerciseForPlates by remember { mutableStateOf<Pair<ExerciseInfo, Double>?>(null) }
+
+    val exerciseRestTimes = remember { mutableStateMapOf<Int, Int>() }
+    val exerciseSetsMap = remember { mutableStateMapOf<Int, SnapshotStateList<SetRowState>>() }
+    val sheetState = rememberModalBottomSheetState()
+
+    var prBannerText by remember { mutableStateOf<String?>(null) }
+    var prBannerSetType by remember { mutableStateOf<String?>(null) }
+    var lastPrBannerText by remember { mutableStateOf("") }
+    var lastPrBannerSetType by remember { mutableStateOf("standard") }
+
     LaunchedEffect(workoutId, workoutStartedAt) {
         while (true) {
             elapsedSeconds = viewModel.activeWorkoutElapsedSeconds()
+            exerciseSetsMap.values.forEach { setList ->
+                setList.forEach { row ->
+                    if (row.isStopwatchRunning && !row.confirmed) {
+                        row.timeSeconds += 1
+                        row.timeInput = formatSecondsToTime(row.timeSeconds)
+                        row.autoFilled = false
+                    }
+                }
+            }
             delay(1000L)
         }
     }
@@ -123,16 +165,6 @@ fun WorkoutLoggingScreen(
         }
     }
 
-    var activeSetRowForType by remember { mutableStateOf<SetRowState?>(null) }
-    var activeExerciseForTimer by remember { mutableStateOf<ExerciseInfo?>(null) }
-    var activeExerciseForPlates by remember { mutableStateOf<Pair<ExerciseInfo, Double>?>(null) }
-
-    val exerciseRestTimes = remember { mutableStateMapOf<Int, Int>() }
-    val exerciseSetsMap = remember { mutableStateMapOf<Int, SnapshotStateList<SetRowState>>() }
-    val sheetState = rememberModalBottomSheetState()
-
-    var prBannerText by remember { mutableStateOf<String?>(null) }
-
     LaunchedEffect(prBannerText) {
         if (prBannerText != null) {
             delay(3500L)
@@ -140,9 +172,9 @@ fun WorkoutLoggingScreen(
         }
     }
 
-    var timerRemaining by remember { mutableIntStateOf(0) }
-    var timerTotal by remember { mutableIntStateOf(0) }
-    var isTimerRunning by remember { mutableStateOf(false) }
+    val timerRemaining = RestTimerNotificationManager.timerRemaining
+    val timerTotal = RestTimerNotificationManager.timerTotal
+    val isTimerRunning = RestTimerNotificationManager.isTimerRunning
 
     var isMenuExpanded by remember { mutableStateOf(false) }
     var isReordering by remember { mutableStateOf(false) }
@@ -172,12 +204,10 @@ fun WorkoutLoggingScreen(
         }
     }
 
-    LaunchedEffect(isTimerRunning, timerRemaining) {
-        if (isTimerRunning && timerRemaining > 0) {
-            delay(1000L)
-            timerRemaining -= 1
-            if (timerRemaining <= 0) { isTimerRunning = false }
-        }
+    val context = LocalContext.current
+    val handleFinish = {
+        RestTimerNotificationManager.cancelTimer(context)
+        onFinish()
     }
 
     BackHandler {
@@ -188,6 +218,7 @@ fun WorkoutLoggingScreen(
                 isReordering = false
             }
         } else {
+            RestTimerNotificationManager.cancelTimer(context)
             onLeaveWorkout()
         }
     }
@@ -240,6 +271,7 @@ fun WorkoutLoggingScreen(
                                         isReordering = false
                                     }
                                 } else {
+                                    RestTimerNotificationManager.cancelTimer(context)
                                     onLeaveWorkout()
                                 }
                             },
@@ -326,14 +358,22 @@ fun WorkoutLoggingScreen(
         },
         bottomBar = {
             if (!isReordering) {
-                Button(
-                    onClick = {
-                        if (hasStructureChanged) showSyncDialog = true else onFinish()
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    shape = RoundedCornerShape(8.dp)
+                Surface(
+                    shadowElevation = 8.dp,
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth().navigationBarsPadding()
                 ) {
-                    Text("Finish workout")
+                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                        Button(
+                            onClick = {
+                                if (hasStructureChanged) showSyncDialog = true else handleFinish()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Finish workout")
+                        }
+                    }
                 }
             }
         }
@@ -426,7 +466,7 @@ fun WorkoutLoggingScreen(
                         val setsList = exerciseSetsMap.getOrPut(exercise.workoutExerciseId) {
                             val initialList = mutableStateListOf<SetRowState>()
                             val templateSets = exercise.templateSets ?: emptyList()
-                            val totalCount = if (templateSets.isNotEmpty()) templateSets.size else maxOf(1, exercise.lastSets?.size ?: 3)
+                            val totalCount = if (templateSets.isNotEmpty()) templateSets.size else maxOf(1, exercise.lastSets?.size ?: 1)
 
                             val workingSets = exercise.lastSets.orEmpty()
                                 .filter { it.setType == "standard" }
@@ -490,6 +530,9 @@ fun WorkoutLoggingScreen(
 
                                 initialList.add(SetRowState(i).apply {
                                     this.setType = draft?.setType ?: currentType
+                                    val calcTimeSeconds = prevSet?.timeSeconds ?: 0
+                                    val calcDistanceKm = prevSet?.distanceKm ?: 0.0
+
                                     // Ustawiamy wyłącznie fallbacki jako podpowiedź (hint)
                                     if (calcWeight > 0.0) {
                                         this.fallbackWeight = if (calcWeight % 1.0 == 0.0) calcWeight.toInt().toString() else calcWeight.toString()
@@ -500,6 +543,12 @@ fun WorkoutLoggingScreen(
                                     if (calcRir >= 0 && (prevSet != null || currentType != "standard")) {
                                         this.fallbackRir = calcRir.toString()
                                     }
+                                    if (calcTimeSeconds > 0) {
+                                        this.fallbackTimeSeconds = calcTimeSeconds
+                                    }
+                                    if (calcDistanceKm > 0.0) {
+                                        this.fallbackDistanceKm = if (calcDistanceKm % 1.0 == 0.0) calcDistanceKm.toInt().toString() else calcDistanceKm.toString()
+                                    }
 
                                     // Przywracamy szkic użytkownika jeśli istniał, w przeciwnym wypadku pole jest puste
                                     if (draft != null) {
@@ -508,12 +557,18 @@ fun WorkoutLoggingScreen(
                                         this.rir = draft.rir
                                         this.confirmed = draft.confirmed
                                         this.autoFilled = false
+                                        this.timeSeconds = draft.timeSeconds
+                                        this.timeInput = draft.timeInput
+                                        this.distanceKm = draft.distanceKm
                                     } else {
                                         this.weight = ""
                                         this.reps = ""
                                         this.rir = ""
                                         this.confirmed = false
                                         this.autoFilled = true
+                                        this.timeSeconds = 0
+                                        this.timeInput = ""
+                                        this.distanceKm = ""
                                     }
                                 })
                             }
@@ -672,10 +727,15 @@ fun WorkoutLoggingScreen(
                                             onPlateCalculatorClick = { currentWeight ->
                                                 activeExerciseForPlates = Pair(exercise, currentWeight)
                                             },
-                                            onStartTimer = { seconds -> timerTotal = seconds; timerRemaining = seconds; isTimerRunning = true },
-                                            onCancelTimer = { timerTotal = 0; timerRemaining = 0; isTimerRunning = false },
+                                            onStartTimer = { seconds -> RestTimerNotificationManager.startTimer(context, seconds) },
+                                            onCancelTimer = { RestTimerNotificationManager.cancelTimer(context) },
                                             onOpenSetType = { row -> activeSetRowForType = row },
-                                            onPrAchieved = { msg -> prBannerText = msg },
+                                            onPrAchieved = { msg, setType ->
+                                                prBannerText = msg
+                                                prBannerSetType = setType
+                                                lastPrBannerText = msg
+                                                lastPrBannerSetType = setType
+                                            },
                                             onStructureChanged = { hasStructureChanged = true }
                                         )
                                     }
@@ -714,10 +774,12 @@ fun WorkoutLoggingScreen(
                     .padding(top = 12.dp, start = 16.dp, end = 16.dp)
                     .zIndex(20f)
             ) {
+                val currentSetType = prBannerSetType ?: lastPrBannerSetType
+                val bannerColor = setTypeColor(currentSetType)
                 OutlinedCard(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    border = BorderStroke(1.5.dp, AccentBlue),
+                    border = BorderStroke(1.5.dp, bannerColor),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -729,14 +791,14 @@ fun WorkoutLoggingScreen(
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = AccentBlue.copy(alpha = 0.2f),
+                            color = bannerColor.copy(alpha = 0.2f),
                             modifier = Modifier.size(40.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Filled.Stars,
                                     contentDescription = "PR",
-                                    tint = AccentBlue,
+                                    tint = bannerColor,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -746,10 +808,10 @@ fun WorkoutLoggingScreen(
                                 text = "NEW PERSONAL RECORD!",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentBlue
+                                color = bannerColor
                             )
                             Text(
-                                text = prBannerText ?: "",
+                                text = prBannerText ?: lastPrBannerText,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -768,9 +830,13 @@ fun WorkoutLoggingScreen(
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = { timerRemaining = maxOf(0, timerRemaining - 30) }) { Text("-30s", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            TextButton(onClick = {
+                                RestTimerNotificationManager.adjustTimer(context, -30)
+                            }) { Text("-30s", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             Text(String.format(Locale.US, "%02d:%02d", timerRemaining / 60, timerRemaining % 60), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
-                            TextButton(onClick = { timerRemaining += 30; timerTotal += 30 }) { Text("+30s", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            TextButton(onClick = {
+                                RestTimerNotificationManager.adjustTimer(context, 30)
+                            }) { Text("+30s", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                         LinearProgressIndicator(progress = { if (timerTotal > 0) timerRemaining.toFloat() / timerTotal else 0f }, modifier = Modifier.fillMaxWidth().height(4.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surface)
                     }
@@ -901,7 +967,7 @@ fun WorkoutLoggingScreen(
 
     if (showSyncDialog) {
         AlertDialog(
-            onDismissRequest = { showSyncDialog = false; onFinish() },
+            onDismissRequest = { showSyncDialog = false; handleFinish() },
             title = { Text("Update original routine?", color = MaterialTheme.colorScheme.onSurface) },
             text = { Text("You changed the exercises or sets. Do you want to update the original routine template for the future?", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
@@ -914,13 +980,13 @@ fun WorkoutLoggingScreen(
                                 viewModel.syncRoutineFromWorkout(rId, wId)
                             }
                             showSyncDialog = false
-                            onFinish()
+                            handleFinish()
                         }
                     }
                 ) { Text("Update Routine", color = MaterialTheme.colorScheme.primary) }
             },
             dismissButton = {
-                TextButton(onClick = { showSyncDialog = false; onFinish() }) {
+                TextButton(onClick = { showSyncDialog = false; handleFinish() }) {
                     Text("No, just finish", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
@@ -940,7 +1006,12 @@ fun WorkoutLoggingScreen(
                     onClick = {
                         val wId = viewModel.currentWorkoutId() ?: return@TextButton
                         cancelling = true
-                        scope.launch { viewModel.deleteWorkout(wId); showCancelDialog = false; onCancelWorkout() }
+                        RestTimerNotificationManager.cancelTimer(context)
+                        scope.launch {
+                            viewModel.deleteWorkout(wId)
+                            showCancelDialog = false
+                            onCancelWorkout()
+                        }
                     }
                 ) { Text("Cancel", color = MaterialTheme.colorScheme.error) }
             },
@@ -1157,7 +1228,7 @@ private fun ExerciseLogContent(
     onStartTimer: (Int) -> Unit,
     onCancelTimer: () -> Unit,
     onOpenSetType: (SetRowState) -> Unit,
-    onPrAchieved: (String) -> Unit,
+    onPrAchieved: (String, String) -> Unit,
     onStructureChanged: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -1170,7 +1241,10 @@ private fun ExerciseLogContent(
             reps = row.reps,
             rir = row.rir,
             confirmed = row.confirmed,
-            setType = row.setType
+            setType = row.setType,
+            timeSeconds = row.timeSeconds,
+            timeInput = row.timeInput,
+            distanceKm = row.distanceKm
         )
     }
 
@@ -1181,6 +1255,9 @@ private fun ExerciseLogContent(
                 row.weight = first.weight
                 row.reps = first.reps
                 row.rir = first.rir
+                row.timeSeconds = first.timeSeconds
+                row.timeInput = first.timeInput
+                row.distanceKm = first.distanceKm
                 syncSetDraft(row)
             }
         }
@@ -1211,6 +1288,8 @@ private fun ExerciseLogContent(
         return 0.0
     }
 
+    val trackingType = getExerciseTrackingType(exercise.type)
+
     Column(modifier = Modifier.fillMaxWidth()) {
         val timerInteractionSource = remember { MutableInteractionSource() }
         val isTimerPressed by timerInteractionSource.collectIsPressedAsState()
@@ -1236,26 +1315,42 @@ private fun ExerciseLogContent(
                 Text(String.format(Locale.US, "%02d:%02d", restSeconds / 60, restSeconds % 60), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
             }
 
-            Row(
-                modifier = Modifier
-                    .clickable(interactionSource = plateInteractionSource, indication = null) {
-                        onPlateCalculatorClick(resolveTargetPlateWeight())
-                    }
-                    .alpha(if (isPlatePressed) 0.4f else 1f)
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Filled.Balance, contentDescription = "Plates", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
+            if (trackingType == ExerciseTrackingType.WEIGHT_AND_REPS) {
+                Row(
+                    modifier = Modifier
+                        .clickable(interactionSource = plateInteractionSource, indication = null) {
+                            onPlateCalculatorClick(resolveTargetPlateWeight())
+                        }
+                        .alpha(if (isPlatePressed) 0.4f else 1f)
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Balance, contentDescription = "Plates", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                }
             }
         }
 
         Row(modifier = Modifier.fillMaxWidth()) {
             Text("Set", modifier = Modifier.weight(0.6f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Weight", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (showRir) {
-                Text("RIR", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            when (trackingType) {
+                ExerciseTrackingType.WEIGHT_AND_REPS -> {
+                    Text("Weight", modifier = Modifier.weight(1.2f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Reps", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (showRir) {
+                        Text("RIR", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                ExerciseTrackingType.REPS_ONLY -> {
+                    Text("Reps", modifier = Modifier.weight(2.2f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                ExerciseTrackingType.TIME_ONLY -> {
+                    Text("Time", modifier = Modifier.weight(2.2f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                ExerciseTrackingType.TIME_AND_DISTANCE -> {
+                    Text("Time", modifier = Modifier.weight(1.4f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Km", modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             Spacer(modifier = Modifier.weight(0.9f))
         }
@@ -1269,120 +1364,318 @@ private fun ExerciseLogContent(
                     val typeInteractionSource = remember { MutableInteractionSource() }
                     val isTypePressed by typeInteractionSource.collectIsPressedAsState()
 
+                    val isPrSet = row.confirmed && row.isPr
+                    val prBrightColor = lerp(typeColor, Color.White, 0.35f)
+
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .weight(0.6f)
                             .clickable(interactionSource = typeInteractionSource, indication = null, enabled = !row.confirmed) { onOpenSetType(row) }
                             .alpha(if (isTypePressed) 0.4f else 1f)
-                            .padding(vertical = 8.dp)
+                            .padding(vertical = 4.dp)
                     ) {
-                        if (row.confirmed && row.isPr) {
-                            Icon(
-                                imageVector = Icons.Filled.Stars,
-                                contentDescription = "PR Record",
-                                tint = typeColor,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
                             Text(
-                                text = "${row.setNumber}",
-                                color = if (row.setType == "standard" && !row.confirmed) MaterialTheme.colorScheme.onSurface else typeColor,
+                                text = setTypeDisplay(row.setType, row.setNumber),
+                                color = when {
+                                    isPrSet -> prBrightColor
+                                    row.confirmed -> typeColor
+                                    row.setType != "standard" -> typeColor
+                                    else -> MaterialTheme.colorScheme.onSurface
+                                },
                                 style = MaterialTheme.typography.titleMedium
                             )
+                            if (isPrSet) {
+                                Spacer(Modifier.width(3.dp))
+                                Icon(
+                                    imageVector = Icons.Filled.Stars,
+                                    contentDescription = "Personal Record",
+                                    tint = lerp(typeColor, Color.White, 0.45f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
                         }
                     }
 
-                    val rowTextColor = if (row.confirmed && row.isPr) typeColor else MaterialTheme.colorScheme.onSurface
+                    val rowTextColor = MaterialTheme.colorScheme.onSurface
+                    val completedBorderColor = if (isPrSet) prBrightColor else typeColor
 
-                    OutlinedTextField(
-                        value = row.weight,
-                        onValueChange = {
-                            row.weight = it.filter { c -> c.isDigit() || c == '.' }
-                            syncSetDraft(row)
-                            if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
-                        },
-                        enabled = !row.confirmed && !row.submitting,
-                        singleLine = true,
-                        placeholder = {
-                            if (row.fallbackWeight.isNotEmpty()) {
-                                Text(
-                                    text = row.fallbackWeight,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                    when (trackingType) {
+                        ExerciseTrackingType.WEIGHT_AND_REPS -> {
+                            OutlinedTextField(
+                                value = row.weight,
+                                onValueChange = {
+                                    row.weight = it.filter { c -> c.isDigit() || c == '.' }
+                                    syncSetDraft(row)
+                                    if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                                },
+                                enabled = !row.confirmed && !row.submitting,
+                                singleLine = true,
+                                placeholder = {
+                                    if (row.fallbackWeight.isNotEmpty()) {
+                                        Text(
+                                            text = row.fallbackWeight,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                        )
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = rowTextColor,
+                                    unfocusedTextColor = rowTextColor,
+                                    disabledTextColor = rowTextColor,
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    disabledBorderColor = if (row.confirmed) completedBorderColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            OutlinedTextField(
+                                value = row.reps,
+                                onValueChange = {
+                                    row.reps = it.filter(Char::isDigit)
+                                    syncSetDraft(row)
+                                    if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                                },
+                                enabled = !row.confirmed && !row.submitting,
+                                singleLine = true,
+                                placeholder = {
+                                    if (row.fallbackReps.isNotEmpty()) {
+                                        Text(
+                                            text = row.fallbackReps,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                        )
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = rowTextColor,
+                                    unfocusedTextColor = rowTextColor,
+                                    disabledTextColor = rowTextColor,
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    disabledBorderColor = if (row.confirmed) completedBorderColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            if (showRir) {
+                                OutlinedTextField(
+                                    value = row.rir,
+                                    onValueChange = {
+                                        row.rir = it.filter(Char::isDigit)
+                                        syncSetDraft(row)
+                                        if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                                    },
+                                    enabled = !row.confirmed && !row.submitting,
+                                    singleLine = true,
+                                    placeholder = {
+                                        if (row.fallbackRir.isNotEmpty()) {
+                                            Text(
+                                                text = row.fallbackRir,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                            )
+                                        }
+                                    },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = rowTextColor,
+                                        unfocusedTextColor = rowTextColor,
+                                        disabledTextColor = rowTextColor,
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                        disabledBorderColor = if (row.confirmed) completedBorderColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                    ),
+                                    shape = RoundedCornerShape(8.dp)
                                 )
                             }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.weight(1.2f).padding(horizontal = 4.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = rowTextColor,
-                            unfocusedTextColor = rowTextColor,
-                            disabledTextColor = rowTextColor,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                            disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                        ),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    OutlinedTextField(
-                        value = row.reps,
-                        onValueChange = {
-                            row.reps = it.filter(Char::isDigit)
-                            syncSetDraft(row)
-                            if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
-                        },
-                        enabled = !row.confirmed && !row.submitting,
-                        singleLine = true,
-                        placeholder = {
-                            if (row.fallbackReps.isNotEmpty()) {
-                                Text(
-                                    text = row.fallbackReps,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-                                )
-                            }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = rowTextColor,
-                            unfocusedTextColor = rowTextColor,
-                            disabledTextColor = rowTextColor,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                            disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                        ),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    if (showRir) {
-                        OutlinedTextField(
-                            value = row.rir,
-                            onValueChange = {
-                                row.rir = it.filter(Char::isDigit)
-                                syncSetDraft(row)
-                                if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
-                            },
-                            enabled = !row.confirmed && !row.submitting,
-                            singleLine = true,
-                            placeholder = {
-                                if (row.fallbackRir.isNotEmpty()) {
+                        }
+                        ExerciseTrackingType.REPS_ONLY -> {
+                            OutlinedTextField(
+                                value = row.reps,
+                                onValueChange = {
+                                    row.reps = it.filter(Char::isDigit)
+                                    syncSetDraft(row)
+                                    if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                                },
+                                enabled = !row.confirmed && !row.submitting,
+                                singleLine = true,
+                                placeholder = {
+                                    if (row.fallbackReps.isNotEmpty()) {
+                                        Text(
+                                            text = row.fallbackReps,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "-",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                        )
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(2.2f).padding(horizontal = 4.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = rowTextColor,
+                                    unfocusedTextColor = rowTextColor,
+                                    disabledTextColor = rowTextColor,
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    disabledBorderColor = if (row.confirmed) completedBorderColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                        }
+                        ExerciseTrackingType.TIME_ONLY -> {
+                            OutlinedTextField(
+                                value = row.timeInput,
+                                onValueChange = {
+                                    row.timeInput = it
+                                    row.timeSeconds = parseTimeToSeconds(it)
+                                    syncSetDraft(row)
+                                    if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                                },
+                                enabled = !row.confirmed && !row.submitting,
+                                singleLine = true,
+                                placeholder = {
+                                    val pl = if (row.fallbackTimeSeconds > 0) formatSecondsToTime(row.fallbackTimeSeconds) else "00:00"
                                     Text(
-                                        text = row.fallbackRir,
+                                        text = pl,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                     )
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = rowTextColor,
-                                unfocusedTextColor = rowTextColor,
-                                disabledTextColor = rowTextColor,
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                disabledBorderColor = if (row.confirmed && row.isPr) typeColor.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        )
+                                },
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = {
+                                            if (!row.confirmed && !row.submitting) {
+                                                if (!row.isStopwatchRunning) {
+                                                    if (row.timeSeconds == 0 && row.timeInput.isNotEmpty()) {
+                                                        row.timeSeconds = parseTimeToSeconds(row.timeInput)
+                                                    }
+                                                    row.isStopwatchRunning = true
+                                                } else {
+                                                    row.isStopwatchRunning = false
+                                                    row.timeInput = formatSecondsToTime(row.timeSeconds)
+                                                    syncSetDraft(row)
+                                                }
+                                            }
+                                        },
+                                        enabled = !row.confirmed && !row.submitting,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (row.isStopwatchRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                            contentDescription = if (row.isStopwatchRunning) "Stop timer" else "Start timer",
+                                            tint = if (row.isStopwatchRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                                modifier = Modifier.weight(2.2f).padding(horizontal = 4.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = rowTextColor,
+                                    unfocusedTextColor = rowTextColor,
+                                    disabledTextColor = rowTextColor,
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = if (row.isStopwatchRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    disabledBorderColor = if (row.confirmed) completedBorderColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                        }
+                        ExerciseTrackingType.TIME_AND_DISTANCE -> {
+                            OutlinedTextField(
+                                value = row.timeInput,
+                                onValueChange = {
+                                    row.timeInput = it
+                                    row.timeSeconds = parseTimeToSeconds(it)
+                                    syncSetDraft(row)
+                                    if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                                },
+                                enabled = !row.confirmed && !row.submitting,
+                                singleLine = true,
+                                placeholder = {
+                                    val pl = if (row.fallbackTimeSeconds > 0) formatSecondsToTime(row.fallbackTimeSeconds) else "00:00"
+                                    Text(
+                                        text = pl,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                    )
+                                },
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = {
+                                            if (!row.confirmed && !row.submitting) {
+                                                if (!row.isStopwatchRunning) {
+                                                    if (row.timeSeconds == 0 && row.timeInput.isNotEmpty()) {
+                                                        row.timeSeconds = parseTimeToSeconds(row.timeInput)
+                                                    }
+                                                    row.isStopwatchRunning = true
+                                                } else {
+                                                    row.isStopwatchRunning = false
+                                                    row.timeInput = formatSecondsToTime(row.timeSeconds)
+                                                    syncSetDraft(row)
+                                                }
+                                            }
+                                        },
+                                        enabled = !row.confirmed && !row.submitting,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (row.isStopwatchRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                            contentDescription = if (row.isStopwatchRunning) "Stop timer" else "Start timer",
+                                            tint = if (row.isStopwatchRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                                modifier = Modifier.weight(1.4f).padding(horizontal = 4.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = rowTextColor,
+                                    unfocusedTextColor = rowTextColor,
+                                    disabledTextColor = rowTextColor,
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = if (row.isStopwatchRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    disabledBorderColor = if (row.confirmed) completedBorderColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            OutlinedTextField(
+                                value = row.distanceKm,
+                                onValueChange = {
+                                    row.distanceKm = it.filter { c -> c.isDigit() || c == '.' }
+                                    syncSetDraft(row)
+                                    if (rowIndex == 0) propagateFromFirstRow() else row.autoFilled = false
+                                },
+                                enabled = !row.confirmed && !row.submitting,
+                                singleLine = true,
+                                placeholder = {
+                                    val pl = if (row.fallbackDistanceKm.isNotEmpty()) row.fallbackDistanceKm else "-"
+                                    Text(
+                                        text = pl,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                    )
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = rowTextColor,
+                                    unfocusedTextColor = rowTextColor,
+                                    disabledTextColor = rowTextColor,
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    disabledBorderColor = if (row.confirmed) completedBorderColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                        }
                     }
 
                     Row(modifier = Modifier.weight(0.9f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
@@ -1394,8 +1687,12 @@ private fun ExerciseLogContent(
 
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = if (row.confirmed) AccentBlue else MaterialTheme.colorScheme.surfaceVariant,
-                                border = BorderStroke(1.dp, if (row.confirmed) AccentBlue else MaterialTheme.colorScheme.outline),
+                                color = if (row.confirmed) {
+                                    if (isPrSet) prBrightColor else typeColor
+                                } else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (row.confirmed) {
+                                    if (isPrSet) prBrightColor else typeColor
+                                } else MaterialTheme.colorScheme.outline),
                                 modifier = Modifier
                                     .size(28.dp)
                                     .alpha(if (isCheckRowPressed) 0.4f else 1f)
@@ -1404,7 +1701,27 @@ private fun ExerciseLogContent(
                                         indication = null
                                     ) {
                                         if (!row.confirmed) {
-                                            // Przepisanie z fallbacku tylko w momencie wysyłki jeśli user nic nie wpisał
+                                            if (row.isStopwatchRunning) {
+                                                row.isStopwatchRunning = false
+                                                row.timeInput = formatSecondsToTime(row.timeSeconds)
+                                            }
+
+                                            val finalTimeSeconds = if (row.timeInput.isNotEmpty()) {
+                                                parseTimeToSeconds(row.timeInput).coerceAtLeast(row.timeSeconds)
+                                            } else if (row.fallbackTimeSeconds > 0) {
+                                                row.fallbackTimeSeconds
+                                            } else {
+                                                row.timeSeconds
+                                            }
+                                            if (finalTimeSeconds > 0) {
+                                                row.timeSeconds = finalTimeSeconds
+                                                row.timeInput = formatSecondsToTime(finalTimeSeconds)
+                                            }
+
+                                            val finalDistanceStr = if (row.distanceKm.isNotEmpty()) row.distanceKm else row.fallbackDistanceKm
+                                            row.distanceKm = finalDistanceStr
+                                            val finalDistance = finalDistanceStr.toDoubleOrNull() ?: 0.0
+
                                             val finalWeightStr = if (row.weight.isNotEmpty()) row.weight else row.fallbackWeight
                                             val finalRepsStr = if (row.reps.isNotEmpty()) row.reps else row.fallbackReps
                                             val finalRirStr = if (row.rir.isNotEmpty()) row.rir else row.fallbackRir
@@ -1416,33 +1733,37 @@ private fun ExerciseLogContent(
                                             val reps = row.reps.toIntOrNull() ?: 0
                                             val weight = row.weight.toDoubleOrNull() ?: 0.0
 
-                                            val prevMaxWeight = exercise.lastSets?.maxOfOrNull { it.weightKg } ?: 0.0
-                                            val prevMaxReps = exercise.lastSets?.maxOfOrNull { it.reps } ?: 0
-                                            val prevMaxVol = exercise.lastSets?.maxOfOrNull { it.weightKg * it.reps } ?: 0.0
-
+                                            val allTimeBestWeight = exercise.bestWeightKg
+                                            val allTimeBestReps = exercise.bestReps
                                             val priorConfirmedSets = sets.filter { it !== row && it.confirmed }
                                             val currentPriorMaxWeight = priorConfirmedSets.maxOfOrNull { it.weight.toDoubleOrNull() ?: 0.0 } ?: 0.0
                                             val currentPriorMaxReps = priorConfirmedSets.maxOfOrNull { it.reps.toIntOrNull() ?: 0 } ?: 0
-                                            val currentPriorMaxVol = priorConfirmedSets.maxOfOrNull { (it.weight.toDoubleOrNull() ?: 0.0) * (it.reps.toIntOrNull() ?: 0) } ?: 0.0
+                                            val currentPriorMaxTime = priorConfirmedSets.maxOfOrNull { it.timeSeconds } ?: 0
+                                            val currentPriorMaxDistance = priorConfirmedSets.maxOfOrNull { it.distanceKm.toDoubleOrNull() ?: 0.0 } ?: 0.0
 
-                                            val benchWeight = maxOf(prevMaxWeight, currentPriorMaxWeight)
-                                            val benchReps = maxOf(prevMaxReps, currentPriorMaxReps)
-                                            val benchVol = maxOf(prevMaxVol, currentPriorMaxVol)
+                                            val isWeightPr = weight > 0.0 && weight > maxOf(allTimeBestWeight, currentPriorMaxWeight)
+                                            val isRepsPr = reps > 0 && reps > maxOf(allTimeBestReps.toDouble(), currentPriorMaxReps.toDouble()).toInt()
+                                            val isTimePr = finalTimeSeconds > 0 && finalTimeSeconds > currentPriorMaxTime
+                                            val isDistancePr = finalDistance > 0.0 && finalDistance > currentPriorMaxDistance
 
-                                            val hasPrior = (exercise.lastSets?.isNotEmpty() == true) || priorConfirmedSets.isNotEmpty()
+                                            val isNewPr = when (trackingType) {
+                                                ExerciseTrackingType.WEIGHT_AND_REPS -> isWeightPr || isRepsPr
+                                                ExerciseTrackingType.REPS_ONLY -> isRepsPr
+                                                ExerciseTrackingType.TIME_ONLY -> isTimePr
+                                                ExerciseTrackingType.TIME_AND_DISTANCE -> isTimePr || isDistancePr
+                                            }
+                                            val localPrLabel = when {
+                                                isWeightPr -> "Heaviest: ${if (weight % 1.0 == 0.0) weight.toInt().toString() else weight.toString()} kg"
+                                                isRepsPr -> "Max Reps: $reps reps"
+                                                isTimePr -> "Best Time: ${formatSecondsToTime(finalTimeSeconds)}"
+                                                isDistancePr -> "Best Distance: $finalDistanceStr km"
+                                                else -> ""
+                                            }
 
-                                            val currentVol = weight * reps
-                                            val isWeightPr = weight > 0.0 && (!hasPrior || weight > benchWeight)
-                                            val isRepsPr = reps > 0 && (!hasPrior || reps > benchReps)
-                                            val isVolPr = currentVol > 0.0 && (!hasPrior || currentVol > benchVol)
-
-                                            val isNewPr = (isWeightPr || isRepsPr || isVolPr) && (weight > 0.0 || reps > 0)
-                                            val weightFormatted = if (weight % 1.0 == 0.0) weight.toInt().toString() else weight.toString()
-                                            val prLabel = if (weight > 0.0) "$weightFormatted kg × $reps" else "$reps reps"
-
-                                            if (isNewPr) {
+                                            if (isNewPr && localPrLabel.isNotEmpty()) {
                                                 row.isPr = true
-                                                onPrAchieved("${exercise.name}: $prLabel")
+                                                row.prLabel = localPrLabel
+                                                onPrAchieved("${exercise.name} - $localPrLabel", row.setType)
                                             }
 
                                             row.error = null
@@ -1463,9 +1784,27 @@ private fun ExerciseLogContent(
 
                                             val rir = if (showRir) (row.rir.toIntOrNull() ?: 0) else 0
                                             scope.launch {
-                                                val success = viewModel.logSet(exercise.workoutExerciseId, row.setNumber, reps, weight, rir, row.setType)
+                                                val res = viewModel.logSet(
+                                                    workoutExerciseId = exercise.workoutExerciseId,
+                                                    setNumber = row.setNumber,
+                                                    reps = reps,
+                                                    weightKg = weight,
+                                                    rir = rir,
+                                                    setType = row.setType,
+                                                    timeSeconds = finalTimeSeconds,
+                                                    distanceKm = finalDistance
+                                                )
                                                 row.submitting = false
-                                                if (!success) {
+                                                if (res != null) {
+                                                    if (res.isPr) {
+                                                        row.isPr = true
+                                                        val label = res.prLabel ?: localPrLabel
+                                                        row.prLabel = label
+                                                        onPrAchieved("${exercise.name} - $label", row.setType)
+                                                    } else if (!isNewPr) {
+                                                        row.isPr = false
+                                                    }
+                                                } else {
                                                     row.confirmed = false
                                                     row.isPr = false
                                                     row.error = "Failed"
@@ -1521,7 +1860,17 @@ private fun ExerciseLogContent(
         TextButton(
             onClick = {
                 val nextSetNum = (sets.maxOfOrNull { it.setNumber } ?: 0) + 1
-                val newRow = SetRowState(nextSetNum)
+                val lastSet = sets.lastOrNull()
+                val newRow = SetRowState(nextSetNum).apply {
+                    this.setType = lastSet?.setType ?: "standard"
+                    if (lastSet != null) {
+                        this.fallbackWeight = lastSet.weight.ifEmpty { lastSet.fallbackWeight }
+                        this.fallbackReps = lastSet.reps.ifEmpty { lastSet.fallbackReps }
+                        this.fallbackRir = lastSet.rir.ifEmpty { lastSet.fallbackRir }
+                        this.fallbackTimeSeconds = if (lastSet.timeSeconds > 0) lastSet.timeSeconds else lastSet.fallbackTimeSeconds
+                        this.fallbackDistanceKm = lastSet.distanceKm.ifEmpty { lastSet.fallbackDistanceKm }
+                    }
+                }
                 sets.add(newRow)
                 syncSetDraft(newRow)
                 onStructureChanged()

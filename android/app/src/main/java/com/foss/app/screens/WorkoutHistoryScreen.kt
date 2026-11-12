@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.foss.app.UiState
@@ -253,7 +254,7 @@ private fun WorkoutSummaryCard(
                             Icon(
                                 imageVector = Icons.Filled.Stars,
                                 contentDescription = null,
-                                tint = AccentBlue,
+                                tint = Color(0xFFFFB300),
                                 modifier = Modifier.size(15.dp)
                             )
                         }
@@ -261,7 +262,7 @@ private fun WorkoutSummaryCard(
                             text = if (workout.prCount == 1) "1 PR" else "${workout.prCount} PRs",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = if (workout.prCount > 0) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (workout.prCount > 0) AccentBlue else MaterialTheme.colorScheme.onSurface
+                            color = if (workout.prCount > 0) Color(0xFFFFB300) else MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }

@@ -1,6 +1,43 @@
 package com.foss.app.models
 
 import com.google.gson.annotations.SerializedName
+import java.util.Locale
+
+enum class ExerciseTrackingType {
+    WEIGHT_AND_REPS,
+    REPS_ONLY,
+    TIME_ONLY,
+    TIME_AND_DISTANCE
+}
+
+fun getExerciseTrackingType(typeString: String?): ExerciseTrackingType {
+    val t = typeString?.trim()?.lowercase(Locale.ROOT) ?: return ExerciseTrackingType.WEIGHT_AND_REPS
+    return when {
+        t == "reps only" || t == "reps_only" -> ExerciseTrackingType.REPS_ONLY
+        t == "time only" || t == "time_only" -> ExerciseTrackingType.TIME_ONLY
+        t == "time & distance" || t == "time_distance" || t == "time and distance" || t == "cardio" -> ExerciseTrackingType.TIME_AND_DISTANCE
+        else -> ExerciseTrackingType.WEIGHT_AND_REPS
+    }
+}
+
+fun formatSecondsToTime(totalSeconds: Int): String {
+    if (totalSeconds <= 0) return ""
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format(Locale.US, "%02d:%02d", minutes, seconds)
+}
+
+fun parseTimeToSeconds(input: String): Int {
+    val clean = input.trim()
+    if (clean.isEmpty()) return 0
+    if (clean.contains(":")) {
+        val parts = clean.split(":")
+        val minutes = parts.getOrNull(0)?.toIntOrNull() ?: 0
+        val seconds = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        return minutes * 60 + seconds
+    }
+    return clean.toIntOrNull() ?: 0
+}
 
 data class Routine(
     @SerializedName("id") val id: Int,
@@ -14,7 +51,9 @@ data class ExerciseInfo(
     @SerializedName("type") val type: String = "Weight & Reps",
     @SerializedName("position") val position: Int,
     @SerializedName("template_sets") val templateSets: List<RoutineSet>?,
-    @SerializedName("last_sets") val lastSets: List<LastSetValue>?
+    @SerializedName("last_sets") val lastSets: List<LastSetValue>?,
+    @SerializedName("best_weight_kg") val bestWeightKg: Double = 0.0,
+    @SerializedName("best_reps") val bestReps: Int = 0
 )
 
 data class StartWorkoutRequest(
@@ -32,6 +71,7 @@ data class RoutineExercisePreview(
     @SerializedName("routine_exercise_id") val routineExerciseId: Int,
     @SerializedName("exercise_id") val exerciseId: Int,
     @SerializedName("name") val name: String,
+    @SerializedName("type") val type: String = "Weight & Reps",
     @SerializedName("position") val position: Int,
     @SerializedName("template_sets") val templateSets: List<RoutineSet>?,
     @SerializedName("last_sets") val lastSets: List<LastSetValue>?
@@ -59,7 +99,9 @@ data class LastSetValue(
     @SerializedName("weight_kg") val weightKg: Double,
     @SerializedName("reps") val reps: Int,
     @SerializedName("rir") val rir: Int,
-    @SerializedName("set_type") val setType: String = "standard"
+    @SerializedName("set_type") val setType: String = "standard",
+    @SerializedName("time_seconds") val timeSeconds: Int = 0,
+    @SerializedName("distance_km") val distanceKm: Double = 0.0
 )
 
 data class WorkoutSummary(
@@ -163,13 +205,16 @@ data class WorkoutDetailSet(
     @SerializedName("reps") val reps: Int,
     @SerializedName("rir") val rir: Int,
     @SerializedName("set_type") val setType: String = "standard",
-    @SerializedName("is_pr") val isPr: Boolean = false
+    @SerializedName("is_pr") val isPr: Boolean = false,
+    @SerializedName("time_seconds") val timeSeconds: Int = 0,
+    @SerializedName("distance_km") val distanceKm: Double = 0.0
 )
 
 data class WorkoutDetailExercise(
     @SerializedName("workout_exercise_id") val workoutExerciseId: Int,
     @SerializedName("exercise_id") val exerciseId: Int,
     @SerializedName("name") val name: String,
+    @SerializedName("type") val type: String = "Weight & Reps",
     @SerializedName("position") val position: Int,
     @SerializedName("sets") val sets: List<WorkoutDetailSet>
 )
@@ -222,6 +267,11 @@ data class RoutineAnalyticsResponse(
 data class UpdateWorkoutDetailsReq(
     @SerializedName("workout_id") val workoutId: Int,
     @SerializedName("exercises") val exercises: List<WorkoutDetailExercise>
+)
+
+data class UpdateRoutineReq(
+    @SerializedName("id") val id: Int,
+    @SerializedName("name") val name: String
 )
 
 data class ConsistencyStats(

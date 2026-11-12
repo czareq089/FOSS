@@ -9,6 +9,7 @@ import com.foss.app.models.*
 import com.foss.app.network.NetworkModule
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import com.foss.app.models.formatSecondsToTime
 import java.util.Locale
 import java.util.TimeZone
 
@@ -24,7 +25,10 @@ data class ActiveSetDraft(
     var reps: String = "",
     var rir: String = "",
     var confirmed: Boolean = false,
-    var setType: String = "standard"
+    var setType: String = "standard",
+    var timeSeconds: Int = 0,
+    var timeInput: String = "",
+    var distanceKm: String = ""
 )
 
 class AppViewModel : ViewModel() {
@@ -85,7 +89,10 @@ class AppViewModel : ViewModel() {
         reps: String,
         rir: String,
         confirmed: Boolean,
-        setType: String
+        setType: String,
+        timeSeconds: Int = 0,
+        timeInput: String = "",
+        distanceKm: String = ""
     ) {
         val exerciseMap = activeWorkoutInputs.getOrPut(workoutExerciseId) { mutableMapOf() }
         exerciseMap[setNumber] = ActiveSetDraft(
@@ -93,7 +100,10 @@ class AppViewModel : ViewModel() {
             reps = reps,
             rir = rir,
             confirmed = confirmed,
-            setType = setType
+            setType = setType,
+            timeSeconds = timeSeconds,
+            timeInput = timeInput,
+            distanceKm = distanceKm
         )
     }
 
@@ -208,10 +218,11 @@ class AppViewModel : ViewModel() {
                             workoutExerciseId = we.workoutExerciseId,
                             exerciseId = we.exerciseId,
                             name = we.name,
+                            type = we.type,
                             position = we.position,
                             templateSets = null,
                             lastSets = we.sets.map { s ->
-                                LastSetValue(s.setNumber, s.weightKg, s.reps, s.rir, s.setType)
+                                LastSetValue(s.setNumber, s.weightKg, s.reps, s.rir, s.setType, s.timeSeconds, s.distanceKm)
                             }
                         )
                     }
@@ -220,12 +231,20 @@ class AppViewModel : ViewModel() {
                         val exMap = activeWorkoutInputs.getOrPut(we.workoutExerciseId) { mutableMapOf() }
                         we.sets.forEach { s ->
                             val wStr = if (s.weightKg % 1.0 == 0.0) s.weightKg.toInt().toString() else s.weightKg.toString()
+                            val distStr = if (s.distanceKm > 0.0) {
+                                if (s.distanceKm % 1.0 == 0.0) s.distanceKm.toInt().toString() else s.distanceKm.toString()
+                            } else ""
+                            val tInput = if (s.timeSeconds > 0) formatSecondsToTime(s.timeSeconds) else ""
+
                             exMap[s.setNumber] = ActiveSetDraft(
                                 weight = wStr,
                                 reps = s.reps.toString(),
                                 rir = s.rir.toString(),
                                 confirmed = true,
-                                setType = s.setType
+                                setType = s.setType,
+                                timeSeconds = s.timeSeconds,
+                                timeInput = tInput,
+                                distanceKm = distStr
                             )
                         }
                     }
@@ -257,18 +276,46 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    suspend fun logSet(workoutExerciseId: Int, setNumber: Int, reps: Int, weightKg: Double, rir: Int, setType: String): Boolean {
+    suspend fun logSet(
+        workoutExerciseId: Int,
+        setNumber: Int,
+        reps: Int,
+        weightKg: Double,
+        rir: Int,
+        setType: String,
+        timeSeconds: Int = 0,
+        distanceKm: Double = 0.0
+    ): SetLogResponse? {
         return try {
-            val ok = api.logSet(
-                SetLogRequest(workoutExerciseId, setNumber, reps, weightKg, rir, setType)
-            ).isSuccessful
-            if (ok) {
-                val wStr = if (weightKg % 1.0 == 0.0) weightKg.toInt().toString() else weightKg.toString()
-                updateSetDraft(workoutExerciseId, setNumber, wStr, reps.toString(), rir.toString(), true, setType)
+            val res = api.logSet(
+                SetLogRequest(workoutExerciseId, setNumber, reps, weightKg, rir, setType, timeSeconds, distanceKm)
+            )
+            if (res.isSuccessful && res.body() != null) {
+                val wStr = if (weightKg > 0.0) {
+                    if (weightKg % 1.0 == 0.0) weightKg.toInt().toString() else weightKg.toString()
+                } else ""
+                val distStr = if (distanceKm > 0.0) {
+                    if (distanceKm % 1.0 == 0.0) distanceKm.toInt().toString() else distanceKm.toString()
+                } else ""
+                val tInput = if (timeSeconds > 0) formatSecondsToTime(timeSeconds) else ""
+                updateSetDraft(
+                    workoutExerciseId,
+                    setNumber,
+                    wStr,
+                    if (reps > 0) reps.toString() else "",
+                    rir.toString(),
+                    true,
+                    setType,
+                    timeSeconds,
+                    tInput,
+                    distStr
+                )
+                res.body()
+            } else {
+                null
             }
-            ok
         } catch (e: Exception) {
-            false
+            null
         }
     }
 
@@ -421,6 +468,19 @@ class AppViewModel : ViewModel() {
     suspend fun deleteRoutine(routineId: Int): Boolean {
         return try {
             api.deleteRoutine(routineId).isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun updateRoutineName(routineId: Int, name: String): Boolean {
+        return try {
+            val response = api.updateRoutine(UpdateRoutineReq(routineId, name))
+            if (response.isSuccessful) {
+                loadRoutines()
+                loadRoutineAnalytics(routineId)
+                true
+            } else false
         } catch (e: Exception) {
             false
         }

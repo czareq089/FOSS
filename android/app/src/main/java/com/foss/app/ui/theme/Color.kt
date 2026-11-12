@@ -19,3 +19,5 @@ fun setTypeColor(setType: String): Color = when (setType) {
     "drop" -> Color(0xFFA855F7)
     else -> AccentBlue
 }
+
+fun setTypeDisplay(setType: String, setNumber: Int): String = "$setNumber"

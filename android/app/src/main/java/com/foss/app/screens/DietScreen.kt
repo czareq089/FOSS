@@ -12,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
@@ -45,7 +46,8 @@ private val ProteinColor = Color(0xFFEF4444)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DietScreen(
-    viewModel: AppViewModel
+    viewModel: AppViewModel,
+    onWeightTrackingClick: () -> Unit = {}
 ) {
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val isToday = remember(selectedDate) { selectedDate.isEqual(LocalDate.now()) }
@@ -82,6 +84,28 @@ fun DietScreen(
             TopAppBar(
                 title = { Text("Diet Tracker") },
                 actions = {
+                    val chartSource = remember { MutableInteractionSource() }
+                    val isChartPressed by chartSource.collectIsPressedAsState()
+
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .size(36.dp)
+                            .alpha(if (isChartPressed) 0.4f else 1f)
+                            .clickable(
+                                interactionSource = chartSource,
+                                indication = null,
+                                onClick = onWeightTrackingClick
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ShowChart,
+                            contentDescription = "Weight Progress & Goals",
+                            tint = AccentBlue
+                        )
+                    }
+
                     val addSource = remember { MutableInteractionSource() }
                     val isAddPressed by addSource.collectIsPressedAsState()
 

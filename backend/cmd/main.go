@@ -20,7 +20,19 @@ func closeRows(rows *sql.Rows) {
 
 const dbPath = "database/foss.db"
 
+func migrateDB() {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return
+	}
+	defer closeDB(db)
+	_, _ = db.Exec(`ALTER TABLE training_workout_sets ADD COLUMN time_seconds INTEGER DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE training_workout_sets ADD COLUMN distance_km REAL DEFAULT 0`)
+}
+
 func main() {
+	migrateDB()
+
 	// ==========================================
 	// 1. WEB HANDLERS (Dashboard & Training HTMX)
 	// ==========================================
@@ -64,6 +76,7 @@ func main() {
 	http.HandleFunc("/api/routines/exercises/add", handleAPIRoutineExerciseAdd)
 	http.HandleFunc("/api/routines/exercises/remove", handleAPIRoutineExerciseRemove)
 	http.HandleFunc("/api/routines/create", handleAPIRoutineCreate)
+	http.HandleFunc("/api/routines/update", handleAPIRoutineUpdate)
 	http.HandleFunc("/api/workouts/exercises/add", handleAPIWorkoutExerciseAdd)
 	http.HandleFunc("/api/workouts/details", handleAPIWorkoutDetails)
 	http.HandleFunc("/api/workouts/exercises/reorder", handleAPIWorkoutReorderExercises)
