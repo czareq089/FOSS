@@ -42,6 +42,8 @@ import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLine
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.compose.common.fill
+import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
+import com.patrykandpatrick.vico.core.cartesian.data.AxisValueOverrider
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
@@ -51,6 +53,8 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 private val RANGES = listOf("1m" to "1M", "3m" to "3M", "6m" to "6M", "1y" to "1Y", "all" to "All")
@@ -160,7 +164,38 @@ fun DietSettingsScreen(
 
     val hasSinglePoint = filteredHistory.size == 1
 
-    LaunchedEffect(filteredHistory, targetWeightVal) {
+    val curWeight = remember(filteredHistory, currentWeightInput) {
+        filteredHistory.lastOrNull()?.weightKg ?: currentWeightInput.toDoubleOrNull() ?: 75.0
+    }
+
+    val chartMinY by remember(filteredHistory, targetWeightVal, curWeight) {
+        derivedStateOf {
+            val avgWeight = (curWeight + targetWeightVal) / 2.0
+            val minLogged = minOf(filteredHistory.minOfOrNull { it.weightKg } ?: curWeight, targetWeightVal)
+            val seventyFivePercent = avgWeight * 0.75
+            if (minLogged >= 60.0 && seventyFivePercent <= 62.0) {
+                60f
+            } else {
+                val floorVal = minOf(seventyFivePercent, minLogged - 1.0)
+                (floor(floorVal / 5.0) * 5.0).coerceAtLeast(0.0).toFloat()
+            }
+        }
+    }
+
+    val chartMaxY by remember(filteredHistory, targetWeightVal, curWeight) {
+        derivedStateOf {
+            val avgWeight = (curWeight + targetWeightVal) / 2.0
+            val maxLogged = maxOf(filteredHistory.maxOfOrNull { it.weightKg } ?: curWeight, targetWeightVal)
+            val candidate = maxOf(avgWeight * 1.08, maxLogged + 1.5)
+            if (maxLogged <= 80.0 && candidate <= 82.0) {
+                80f
+            } else {
+                (ceil(candidate / 5.0) * 5.0).toFloat()
+            }
+        }
+    }
+
+    LaunchedEffect(filteredHistory, targetWeightVal, chartMinY, chartMaxY) {
         if (filteredHistory.isNotEmpty()) {
             val rawValues: List<Float> = filteredHistory.map { it.weightKg.toFloat() }
 
@@ -168,14 +203,12 @@ fun DietSettingsScreen(
                 modelProducer.runTransaction {
                     lineSeries {
                         if (hasSinglePoint) {
-                            series(listOf(40f, 40f))
+                            val singleVal = rawValues.firstOrNull() ?: targetWeightVal.toFloat()
+                            series(listOf(singleVal, singleVal))
                             series(listOf(targetWeightVal.toFloat(), targetWeightVal.toFloat()))
-                            series(listOf(100f, 100f))
                         } else {
                             series(rawValues)
                             series(List(rawValues.size) { targetWeightVal.toFloat() })
-                            series(List(rawValues.size) { 40f })
-                            series(List(rawValues.size) { 100f })
                         }
                     }
                 }
@@ -650,27 +683,24 @@ fun DietSettingsScreen(
                                                         ),
                                                         rememberLine(
                                                             fill = LineCartesianLayer.LineFill.single(fill(TargetColor)),
-                                                            thickness = 2.dp,
+                                                            thickness = 1.5.dp,
                                                             pointConnector = LineCartesianLayer.PointConnector.cubic(curvature = 0f),
                                                             areaFill = null
-                                                        ),
-                                                        rememberLine(
-                                                            fill = LineCartesianLayer.LineFill.single(fill(Color.Transparent)),
-                                                            thickness = 0.dp,
-                                                            areaFill = null
-                                                        ),
-                                                        rememberLine(
-                                                            fill = LineCartesianLayer.LineFill.single(fill(Color.Transparent)),
-                                                            thickness = 0.dp,
-                                                            areaFill = null
                                                         )
-                                                    )
+                                                    ),
+                                                    axisValueOverrider = remember(chartMinY, chartMaxY) {
+                                                        AxisValueOverrider.fixed(
+                                                            minY = chartMinY.toDouble(),
+                                                            maxY = chartMaxY.toDouble()
+                                                        )
+                                                    }
                                                 ),
                                                 startAxis = rememberStartAxis(
                                                     valueFormatter = { value, _, _ ->
                                                         val intVal = value.roundToInt()
-                                                        if (intVal in listOf(40, 60, 80, 100)) "$intVal" else ""
-                                                    }
+                                                        if (intVal % 5 == 0) "$intVal" else ""
+                                                    },
+                                                    itemPlacer = remember { VerticalAxis.ItemPlacer.step({ 5.0 }) }
                                                 ),
                                                 bottomAxis = rememberBottomAxis()
                                             ),
@@ -680,7 +710,8 @@ fun DietSettingsScreen(
 
                                         if (hasSinglePoint) {
                                             Canvas(modifier = Modifier.fillMaxSize().padding(start = 36.dp, bottom = 24.dp, top = 8.dp, end = 8.dp)) {
-                                                val yRatio = ((activePoint.weightKg - 40.0) / 60.0).coerceIn(0.0, 1.0).toFloat()
+                                                val span = (chartMaxY - chartMinY).coerceAtLeast(1f)
+                                                val yRatio = ((activePoint.weightKg.toFloat() - chartMinY) / span).coerceIn(0f, 1f)
                                                 val yPos = size.height * (1f - yRatio)
                                                 val xPos = size.width / 2f
                                                 drawCircle(
