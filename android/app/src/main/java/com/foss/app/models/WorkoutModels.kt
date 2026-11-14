@@ -41,7 +41,9 @@ fun parseTimeToSeconds(input: String): Int {
 
 data class Routine(
     @SerializedName("id") val id: Int,
-    @SerializedName("name") val name: String
+    @SerializedName("name") val name: String,
+    @SerializedName("group_name") val groupName: String = "",
+    @SerializedName("is_archived") val isArchived: Boolean = false
 )
 
 data class ExerciseInfo(
@@ -53,7 +55,8 @@ data class ExerciseInfo(
     @SerializedName("template_sets") val templateSets: List<RoutineSet>?,
     @SerializedName("last_sets") val lastSets: List<LastSetValue>?,
     @SerializedName("best_weight_kg") val bestWeightKg: Double = 0.0,
-    @SerializedName("best_reps") val bestReps: Int = 0
+    @SerializedName("best_reps") val bestReps: Int = 0,
+    @SerializedName("rest_seconds") val restSeconds: Int = 90
 )
 
 data class StartWorkoutRequest(
@@ -74,7 +77,8 @@ data class RoutineExercisePreview(
     @SerializedName("type") val type: String = "Weight & Reps",
     @SerializedName("position") val position: Int,
     @SerializedName("template_sets") val templateSets: List<RoutineSet>?,
-    @SerializedName("last_sets") val lastSets: List<LastSetValue>?
+    @SerializedName("last_sets") val lastSets: List<LastSetValue>?,
+    @SerializedName("rest_seconds") var restSeconds: Int = 90
 ) {
     @Transient
     private var _mutableTemplateSets: androidx.compose.runtime.snapshots.SnapshotStateList<RoutineSet>? = null
@@ -190,7 +194,8 @@ data class AddRoutineExerciseReq(
 
 data class CreateRoutineReq(
     @SerializedName("user_id") val userId: Int,
-    @SerializedName("name") val name: String
+    @SerializedName("name") val name: String,
+    @SerializedName("group_name") val groupName: String? = null
 )
 
 data class AddWorkoutExerciseReq(
@@ -216,7 +221,8 @@ data class WorkoutDetailExercise(
     @SerializedName("name") val name: String,
     @SerializedName("type") val type: String = "Weight & Reps",
     @SerializedName("position") val position: Int,
-    @SerializedName("sets") val sets: List<WorkoutDetailSet>
+    @SerializedName("sets") val sets: List<WorkoutDetailSet>,
+    @SerializedName("rest_seconds") val restSeconds: Int = 90
 )
 
 data class WorkoutDetailResponse(
@@ -233,7 +239,8 @@ data class RoutineSet(
 
 data class UpdateRoutineSetsReq(
     @SerializedName("routine_exercise_id") val routineExerciseId: Int,
-    @SerializedName("sets") val sets: List<RoutineSet>
+    @SerializedName("sets") val sets: List<RoutineSet>,
+    @SerializedName("rest_seconds") val restSeconds: Int? = null
 )
 
 data class ExerciseHistoryPoint(
@@ -271,7 +278,9 @@ data class UpdateWorkoutDetailsReq(
 
 data class UpdateRoutineReq(
     @SerializedName("id") val id: Int,
-    @SerializedName("name") val name: String
+    @SerializedName("name") val name: String,
+    @SerializedName("group_name") val groupName: String? = null,
+    @SerializedName("is_archived") val isArchived: Boolean? = null
 )
 
 data class ConsistencyStats(

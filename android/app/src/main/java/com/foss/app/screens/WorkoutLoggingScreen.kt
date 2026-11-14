@@ -191,6 +191,11 @@ fun WorkoutLoggingScreen(
     LaunchedEffect(state) {
         if (state is UiState.Success) {
             val incoming = state.data.third
+            incoming.forEach { ex ->
+                if (!exerciseRestTimes.containsKey(ex.workoutExerciseId)) {
+                    exerciseRestTimes[ex.workoutExerciseId] = if (ex.restSeconds > 0) ex.restSeconds else 90
+                }
+            }
             if (exercises.isEmpty()) {
                 exercises.addAll(incoming)
             } else {
@@ -452,7 +457,7 @@ fun WorkoutLoggingScreen(
                     }
 
                     itemsIndexed(items = exercises, key = { _, exercise -> exercise.workoutExerciseId }) { index, exercise ->
-                        val currentRestTime = exerciseRestTimes[exercise.workoutExerciseId] ?: 90
+                        val currentRestTime = exerciseRestTimes[exercise.workoutExerciseId] ?: (if (exercise.restSeconds > 0) exercise.restSeconds else 90)
 
                         val isDragged = draggedIndex == index
                         val isTarget = targetIndex == index && draggedIndex != index
@@ -930,7 +935,7 @@ fun WorkoutLoggingScreen(
 
     if (activeExerciseForTimer != null) {
         val exercise = activeExerciseForTimer!!
-        var tempSeconds by remember { mutableIntStateOf(exerciseRestTimes[exercise.workoutExerciseId] ?: 90) }
+        var tempSeconds by remember { mutableIntStateOf(exerciseRestTimes[exercise.workoutExerciseId] ?: (if (exercise.restSeconds > 0) exercise.restSeconds else 90)) }
         var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
         ModalBottomSheet(onDismissRequest = { activeExerciseForTimer = null }, sheetState = sheetState, containerColor = MaterialTheme.colorScheme.surface) {

@@ -443,6 +443,7 @@ func handleWebTrainingList(w http.ResponseWriter, r *http.Request) {
 	} else if r.Method == http.MethodDelete {
 		routineID := r.URL.Query().Get("id")
 		if routineID != "" {
+			_, _ = db.Exec(`UPDATE training_workouts SET routine_name = (SELECT name FROM training_routines WHERE id = ?) WHERE routine_id = ? AND (routine_name IS NULL OR routine_name = '')`, routineID, routineID)
 			_, _ = db.Exec(`UPDATE training_workouts SET routine_id = NULL WHERE routine_id = ?`, routineID)
 			_, _ = db.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ?`, routineID)
 			_, _ = db.Exec(`DELETE FROM training_routines WHERE id = ? AND user_id = 1`, routineID)
@@ -450,12 +451,12 @@ func handleWebTrainingList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(`
-		SELECT r.id, r.name, COUNT(re.id) as ex_count
+		SELECT r.id, r.name, COALESCE(r.group_name, ''), COUNT(re.id) as ex_count
 		FROM training_routines r
 		LEFT JOIN training_routine_exercises re ON re.routine_id = r.id
 		WHERE r.user_id = 1
 		GROUP BY r.id
-		ORDER BY r.created_at DESC`)
+		ORDER BY r.group_name COLLATE NOCASE, r.created_at DESC`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -468,15 +469,20 @@ func handleWebTrainingList(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		hasRoutines = true
 		var id, count int
-		var name string
-		if err := rows.Scan(&id, &name, &count); err != nil {
+		var name, groupName string
+		if err := rows.Scan(&id, &name, &groupName, &count); err != nil {
 			continue
+		}
+
+		groupBadge := ""
+		if groupName != "" {
+			groupBadge = fmt.Sprintf(`<span style="background: var(--color-surface-2); font-size: 0.75rem; color: var(--color-primary); margin-left: 8px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--color-border);">📁 %s</span>`, groupName)
 		}
 
 		sb.WriteString(fmt.Sprintf(`
 			<div class="routine-card" id="routine-%d">
 				<div style="flex: 1; cursor: pointer;" hx-get="/web/training/detail?id=%d" hx-target="#routine-detail-modal-content" hx-on::after-request="document.getElementById('routine-modal').showModal()">
-					<h4 style="margin: 0 0 0.25rem 0; font-size: 1.15rem; color: #fff;">%s</h4>
+					<h4 style="margin: 0 0 0.25rem 0; font-size: 1.15rem; color: #fff;">%s %s</h4>
 					<span style="font-size: 0.85rem; color: var(--color-text-dim);">%d exercises</span>
 				</div>
 				<div style="display: flex; gap: 8px;">
@@ -494,7 +500,7 @@ func handleWebTrainingList(w http.ResponseWriter, r *http.Request) {
 					</button>
 				</div>
 			</div>
-		`, id, id, name, count, id, id, name))
+		`, id, id, name, groupBadge, count, id, id, name))
 	}
 
 	if !hasRoutines {
@@ -629,8 +635,8 @@ func handleWebRoutineEditModal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer closeDB(db)
 
-	var routineName string
-	err = db.QueryRow(`SELECT name FROM training_routines WHERE id = ? AND user_id = 1`, routineID).Scan(&routineName)
+	var routineName, routineGroup string
+	err = db.QueryRow(`SELECT name, COALESCE(group_name, '') FROM training_routines WHERE id = ? AND user_id = 1`, routineID).Scan(&routineName, &routineGroup)
 	if err != nil {
 		_, _ = fmt.Fprint(w, "<p>Routine not found.</p>")
 		return
@@ -674,9 +680,14 @@ func handleWebRoutineEditModal(w http.ResponseWriter, r *http.Request) {
 				<input type="text" name="routine_name" value="%s" class="form-input" required>
 			</div>
 
+			<div style="margin-top: 1rem;">
+				<label style="font-size: 0.85rem; color: var(--color-text-dim); display: block; margin-bottom: 4px;">Group / Folder (optional)</label>
+				<input type="text" name="group_name" value="%s" class="form-input" placeholder="e.g. Push Pull Legs">
+			</div>
+
 			<h4 style="margin: 1.5rem 0 0.5rem 0; font-size: 1rem; color: #fff;">Exercises & Sets Template</h4>
 			<div id="routine-exercises-list" style="max-height: 48vh; overflow-y: auto; padding-right: 4px;">
-	`, routineID, routineName))
+	`, routineID, routineName, routineGroup))
 
 	idx := 0
 	for rows.Next() {
@@ -796,6 +807,7 @@ func handleWebRoutineSave(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	routineID := r.FormValue("routine_id")
 	routineName := strings.TrimSpace(r.FormValue("routine_name"))
+	groupName := strings.TrimSpace(r.FormValue("group_name"))
 	if routineID == "" || routineName == "" {
 		http.Error(w, "Missing fields", http.StatusBadRequest)
 		return
@@ -814,7 +826,7 @@ func handleWebRoutineSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, _ = tx.Exec(`UPDATE training_routines SET name = ? WHERE id = ? AND user_id = 1`, routineName, routineID)
+	_, _ = tx.Exec(`UPDATE training_routines SET name = ?, group_name = ? WHERE id = ? AND user_id = 1`, routineName, groupName, routineID)
 	_, _ = tx.Exec(`DELETE FROM training_routine_sets WHERE routine_exercise_id IN (SELECT id FROM training_routine_exercises WHERE routine_id = ?)`, routineID)
 	_, _ = tx.Exec(`DELETE FROM training_routine_exercises WHERE routine_id = ?`, routineID)
 
@@ -870,7 +882,7 @@ func handleWebWorkoutsTab(w http.ResponseWriter, r *http.Request) {
 		SELECT 
 			w.id,
 			w.date,
-			COALESCE(r.name, 'Custom Workout') as routine_name,
+			COALESCE(r.name, NULLIF(w.routine_name, ''), 'Custom Workout') as routine_name,
 			COALESCE(SUM(CASE WHEN s.weight_kg > 0 AND s.reps > 0 THEN s.weight_kg * s.reps ELSE 0 END), 0) as total_volume,
 			COUNT(s.id) as total_sets
 		FROM training_workouts w
@@ -969,7 +981,7 @@ func handleWebWorkoutEditModal(w http.ResponseWriter, r *http.Request) {
 
 	var workoutDate, routineName string
 	err = db.QueryRow(`
-		SELECT w.date, COALESCE(r.name, 'Custom Workout') 
+		SELECT w.date, COALESCE(r.name, NULLIF(w.routine_name, ''), 'Custom Workout') 
 		FROM training_workouts w 
 		LEFT JOIN training_routines r ON r.id = w.routine_id 
 		WHERE w.id = ? AND w.user_id = 1`, workoutID).Scan(&workoutDate, &routineName)

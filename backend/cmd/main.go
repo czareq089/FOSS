@@ -28,6 +28,12 @@ func migrateDB() {
 	defer closeDB(db)
 	_, _ = db.Exec(`ALTER TABLE training_workout_sets ADD COLUMN time_seconds INTEGER DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE training_workout_sets ADD COLUMN distance_km REAL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE training_routines ADD COLUMN group_name TEXT DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE training_routines ADD COLUMN is_archived INTEGER DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE training_workouts ADD COLUMN routine_name TEXT DEFAULT ''`)
+	_, _ = db.Exec(`UPDATE training_workouts SET routine_name = (SELECT name FROM training_routines WHERE id = training_workouts.routine_id) WHERE routine_id IS NOT NULL AND (routine_name IS NULL OR routine_name = '')`)
+	_, _ = db.Exec(`ALTER TABLE training_routine_exercises ADD COLUMN rest_seconds INTEGER DEFAULT 90`)
+	_, _ = db.Exec(`ALTER TABLE training_workout_exercises ADD COLUMN rest_seconds INTEGER DEFAULT 90`)
 }
 
 func main() {

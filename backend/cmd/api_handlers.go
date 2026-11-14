@@ -38,8 +38,10 @@ type SetLogRequest struct {
 }
 
 type Routine struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	GroupName  string `json:"group_name"`
+	IsArchived bool   `json:"is_archived"`
 }
 
 type ExerciseInfo struct {
@@ -52,6 +54,7 @@ type ExerciseInfo struct {
 	LastSets          []LastSetValue `json:"last_sets"`
 	BestWeightKg      float64        `json:"best_weight_kg"`
 	BestReps          int            `json:"best_reps"`
+	RestSeconds       int            `json:"rest_seconds"`
 }
 
 type SetLogResponse struct {
@@ -101,6 +104,7 @@ type RoutineExercisePreview struct {
 	Position          int            `json:"position"`
 	TemplateSets      []RoutineSet   `json:"template_sets"`
 	LastSets          []LastSetValue `json:"last_sets"`
+	RestSeconds       int            `json:"rest_seconds"`
 }
 
 type ReorderPosition struct {
@@ -153,8 +157,9 @@ type AddRoutineExerciseReq struct {
 }
 
 type CreateRoutineReq struct {
-	UserID int    `json:"user_id"`
-	Name   string `json:"name"`
+	UserID    int    `json:"user_id"`
+	Name      string `json:"name"`
+	GroupName string `json:"group_name,omitempty"`
 }
 
 type AddWorkoutExerciseReq struct {
@@ -181,6 +186,7 @@ type WorkoutDetailExercise struct {
 	Type              string             `json:"type"`
 	Position          int                `json:"position"`
 	Sets              []WorkoutDetailSet `json:"sets"`
+	RestSeconds       int                `json:"rest_seconds"`
 }
 
 type WorkoutDetailResponse struct {
@@ -198,6 +204,7 @@ type RoutineSet struct {
 type UpdateRoutineSetsReq struct {
 	RoutineExerciseID int          `json:"routine_exercise_id"`
 	Sets              []RoutineSet `json:"sets"`
+	RestSeconds       *int         `json:"rest_seconds,omitempty"`
 }
 
 type ExerciseHistoryPoint struct {
@@ -234,8 +241,10 @@ type UpdateWorkoutDetailsReq struct {
 }
 
 type UpdateRoutineReq struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID         int     `json:"id"`
+	Name       string  `json:"name"`
+	GroupName  *string `json:"group_name,omitempty"`
+	IsArchived *bool   `json:"is_archived,omitempty"`
 }
 
 type UserPlate struct {
@@ -565,7 +574,7 @@ func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 		if userID == "" {
 			userID = "1"
 		}
-		rows, err := db.Query(`SELECT id, name FROM training_routines WHERE user_id = ? ORDER BY name COLLATE NOCASE`, userID)
+		rows, err := db.Query(`SELECT id, name, COALESCE(group_name, ''), COALESCE(is_archived, 0) FROM training_routines WHERE user_id = ? ORDER BY is_archived ASC, group_name COLLATE NOCASE, name COLLATE NOCASE`, userID)
 		if err != nil {
 			http.Error(w, "Failed to fetch routines", http.StatusInternalServerError)
 			return
@@ -575,9 +584,11 @@ func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 		routines := make([]Routine, 0)
 		for rows.Next() {
 			var rt Routine
-			if err := rows.Scan(&rt.ID, &rt.Name); err != nil {
+			var isArchivedInt int
+			if err := rows.Scan(&rt.ID, &rt.Name, &rt.GroupName, &isArchivedInt); err != nil {
 				continue
 			}
+			rt.IsArchived = (isArchivedInt != 0)
 			routines = append(routines, rt)
 		}
 
@@ -596,6 +607,11 @@ func handleAPIRoutines(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if _, err := tx.Exec(`UPDATE training_workouts SET routine_name = (SELECT name FROM training_routines WHERE id = ?) WHERE routine_id = ? AND (routine_name IS NULL OR routine_name = '')`, routineID, routineID); err != nil {
+			_ = tx.Rollback()
+			http.Error(w, "Failed to preserve workout routine names", http.StatusInternalServerError)
+			return
+		}
 		if _, err := tx.Exec(`UPDATE training_workouts SET routine_id = NULL WHERE routine_id = ?`, routineID); err != nil {
 			_ = tx.Rollback()
 			http.Error(w, "Failed to update workouts", http.StatusInternalServerError)
@@ -768,7 +784,7 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 	defer closeDB(db)
 
 	rows, err := db.Query(`
-       SELECT re.id, re.exercise_id, e.name, COALESCE(e.type, 'weight_reps'), re.position
+       SELECT re.id, re.exercise_id, e.name, COALESCE(e.type, 'weight_reps'), re.position, COALESCE(re.rest_seconds, 90)
        FROM training_routine_exercises re
        JOIN training_exercises e ON e.id = re.exercise_id
        WHERE re.routine_id = ?
@@ -781,7 +797,7 @@ func handleAPIRoutineExercises(w http.ResponseWriter, r *http.Request) {
 	exercises := make([]RoutineExercisePreview, 0)
 	for rows.Next() {
 		var ex RoutineExercisePreview
-		if err := rows.Scan(&ex.RoutineExerciseID, &ex.ExerciseID, &ex.Name, &ex.Type, &ex.Position); err != nil {
+		if err := rows.Scan(&ex.RoutineExerciseID, &ex.ExerciseID, &ex.Name, &ex.Type, &ex.Position, &ex.RestSeconds); err != nil {
 			continue
 		}
 
@@ -931,7 +947,7 @@ func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
            SELECT 
               w.id, 
               w.date, 
-              COALESCE(r.name, 'Custom workout'),
+              COALESCE(r.name, NULLIF(w.routine_name, ''), 'Custom workout'),
               COALESCE(COUNT(s.id), 0) as total_sets,
               COALESCE(SUM(s.reps), 0) as total_reps,
               COALESCE(SUM(s.weight_kg * s.reps), 0) as total_weight_kg
@@ -940,7 +956,7 @@ func handleAPIWorkouts(w http.ResponseWriter, r *http.Request) {
            LEFT JOIN training_workout_exercises we ON we.workout_id = w.id
            LEFT JOIN training_workout_sets s ON s.workout_exercise_id = we.id
            WHERE w.user_id = ?
-           GROUP BY w.id, w.date, r.name
+           GROUP BY w.id, w.date, r.name, w.routine_name
            ORDER BY w.date DESC, w.id DESC`, userID)
 		if err != nil {
 			http.Error(w, "Failed to fetch workouts", http.StatusInternalServerError)
@@ -1104,7 +1120,13 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	}
 	defer closeDB(db)
 
-	res, err := db.Exec(`INSERT INTO training_workouts (user_id, routine_id) VALUES (?, ?)`, req.UserID, req.RoutineID)
+	var rName string
+	_ = db.QueryRow(`SELECT name FROM training_routines WHERE id = ?`, req.RoutineID).Scan(&rName)
+	if rName == "" {
+		rName = "Custom workout"
+	}
+
+	res, err := db.Exec(`INSERT INTO training_workouts (user_id, routine_id, routine_name) VALUES (?, ?, ?)`, req.UserID, req.RoutineID, rName)
 	if err != nil {
 		http.Error(w, "Failed to create workout", http.StatusInternalServerError)
 		return
@@ -1112,7 +1134,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	workoutID, _ := res.LastInsertId()
 
 	rows, err := db.Query(`
-    SELECT re.id, re.exercise_id, e.name, COALESCE(e.type, 'weight_reps'), re.position
+    SELECT re.id, re.exercise_id, e.name, COALESCE(e.type, 'weight_reps'), re.position, COALESCE(re.rest_seconds, 90)
     FROM training_routine_exercises re
     JOIN training_exercises e ON e.id = re.exercise_id
     WHERE re.routine_id = ?
@@ -1123,16 +1145,17 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type routineExercise struct {
-		id         int
-		exerciseID int
-		name       string
-		exType     string
-		position   int
+		id          int
+		exerciseID  int
+		name        string
+		exType      string
+		position    int
+		restSeconds int
 	}
 	var routineExercises []routineExercise
 	for rows.Next() {
 		var re routineExercise
-		if err := rows.Scan(&re.id, &re.exerciseID, &re.name, &re.exType, &re.position); err != nil {
+		if err := rows.Scan(&re.id, &re.exerciseID, &re.name, &re.exType, &re.position, &re.restSeconds); err != nil {
 			continue
 		}
 		routineExercises = append(routineExercises, re)
@@ -1141,7 +1164,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 
 	exercises := make([]ExerciseInfo, 0)
 	for _, re := range routineExercises {
-		weRes, err := db.Exec(`INSERT INTO training_workout_exercises (workout_id, exercise_id, position) VALUES (?, ?, ?)`, workoutID, re.exerciseID, re.position)
+		weRes, err := db.Exec(`INSERT INTO training_workout_exercises (workout_id, exercise_id, position, rest_seconds) VALUES (?, ?, ?, ?)`, workoutID, re.exerciseID, re.position, re.restSeconds)
 		if err != nil {
 			continue
 		}
@@ -1181,6 +1204,7 @@ func handleAPIStartWorkout(w http.ResponseWriter, r *http.Request) {
 			LastSets:          lSets,
 			BestWeightKg:      bestW,
 			BestReps:          bestR,
+			RestSeconds:       re.restSeconds,
 		})
 	}
 
@@ -1388,6 +1412,13 @@ func handleAPIRoutineCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Name = strings.TrimSpace(req.Name)
+	req.GroupName = strings.TrimSpace(req.GroupName)
+	if req.UserID <= 0 || req.Name == "" {
+		http.Error(w, "Invalid user ID or routine name", http.StatusBadRequest)
+		return
+	}
+
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		http.Error(w, "Database error", http.StatusInternalServerError)
@@ -1395,7 +1426,7 @@ func handleAPIRoutineCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer closeDB(db)
 
-	_, err = db.Exec(`INSERT INTO training_routines (user_id, name) VALUES (?, ?)`, req.UserID, req.Name)
+	_, err = db.Exec(`INSERT INTO training_routines (user_id, name, group_name, is_archived) VALUES (?, ?, ?, 0)`, req.UserID, req.Name, req.GroupName)
 	if err != nil {
 		http.Error(w, "Failed to create routine", http.StatusInternalServerError)
 		return
@@ -1416,8 +1447,8 @@ func handleAPIRoutineUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Name = strings.TrimSpace(req.Name)
-	if req.ID <= 0 || req.Name == "" {
-		http.Error(w, "Invalid routine ID or name", http.StatusBadRequest)
+	if req.ID <= 0 {
+		http.Error(w, "Invalid routine ID", http.StatusBadRequest)
 		return
 	}
 
@@ -1428,13 +1459,33 @@ func handleAPIRoutineUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer closeDB(db)
 
-	_, err = db.Exec(`UPDATE training_routines SET name = ? WHERE id = ?`, req.Name, req.ID)
-	if err != nil {
-		http.Error(w, "Failed to update routine name", http.StatusInternalServerError)
-		return
+	if req.Name != "" {
+		_, err = db.Exec(`UPDATE training_routines SET name = ? WHERE id = ?`, req.Name, req.ID)
+		if err != nil {
+			http.Error(w, "Failed to update routine name", http.StatusInternalServerError)
+			return
+		}
 	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	if req.GroupName != nil {
+		gName := strings.TrimSpace(*req.GroupName)
+		_, err = db.Exec(`UPDATE training_routines SET group_name = ? WHERE id = ?`, gName, req.ID)
+		if err != nil {
+			http.Error(w, "Failed to update routine group", http.StatusInternalServerError)
+			return
+		}
+	}
+	if req.IsArchived != nil {
+		archVal := 0
+		if *req.IsArchived {
+			archVal = 1
+		}
+		_, err = db.Exec(`UPDATE training_routines SET is_archived = ? WHERE id = ?`, archVal, req.ID)
+		if err != nil {
+			http.Error(w, "Failed to update routine archive state", http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleAPIWorkoutExerciseAdd(w http.ResponseWriter, r *http.Request) {
@@ -1523,7 +1574,7 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 	var workoutDate string
 
 	err = db.QueryRow(`
-       SELECT id, user_id, date, COALESCE((SELECT name FROM training_routines WHERE id = routine_id), 'Custom workout') 
+       SELECT id, user_id, date, COALESCE((SELECT name FROM training_routines WHERE id = routine_id), NULLIF(routine_name, ''), 'Custom workout') 
        FROM training_workouts WHERE id = ?`, workoutID).Scan(&resp.WorkoutID, &workoutUserID, &workoutDate, &resp.RoutineName)
 	resp.Date = workoutDate
 
@@ -1535,7 +1586,7 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 	resp.Exercises = make([]WorkoutDetailExercise, 0)
 
 	rows, err := db.Query(`
-       SELECT we.id, we.exercise_id, e.name, COALESCE(e.type, 'weight_reps'), we.position 
+       SELECT we.id, we.exercise_id, e.name, COALESCE(e.type, 'weight_reps'), we.position, COALESCE(we.rest_seconds, 90) 
        FROM training_workout_exercises we 
        JOIN training_exercises e ON e.id = we.exercise_id 
        WHERE we.workout_id = ? ORDER BY we.position`, workoutID)
@@ -1543,7 +1594,7 @@ func handleAPIWorkoutDetails(w http.ResponseWriter, r *http.Request) {
 		defer closeRows(rows)
 		for rows.Next() {
 			var ex WorkoutDetailExercise
-			if err := rows.Scan(&ex.WorkoutExerciseID, &ex.ExerciseID, &ex.Name, &ex.Type, &ex.Position); err != nil {
+			if err := rows.Scan(&ex.WorkoutExerciseID, &ex.ExerciseID, &ex.Name, &ex.Type, &ex.Position, &ex.RestSeconds); err != nil {
 				continue
 			}
 			ex.Sets = make([]WorkoutDetailSet, 0)
@@ -1627,6 +1678,9 @@ func handleAPIUpdateRoutineSets(w http.ResponseWriter, r *http.Request) {
 	for _, s := range req.Sets {
 		_, _ = tx.Exec(`INSERT INTO training_routine_sets (routine_exercise_id, set_number, set_type) VALUES (?, ?, ?)`, req.RoutineExerciseID, s.SetNumber, s.SetType)
 	}
+	if req.RestSeconds != nil && *req.RestSeconds > 0 {
+		_, _ = tx.Exec(`UPDATE training_routine_exercises SET rest_seconds = ? WHERE id = ?`, *req.RestSeconds, req.RoutineExerciseID)
+	}
 	_ = tx.Commit()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1682,7 +1736,12 @@ func handleAPISyncRoutineFromWorkout(w http.ResponseWriter, r *http.Request) {
 	closeRows(rows)
 
 	for _, we := range wExercises {
-		res, err := tx.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets) VALUES (?, ?, ?, 3)`, req.RoutineID, we.exID, we.pos)
+		var restSec int
+		_ = tx.QueryRow(`SELECT COALESCE(rest_seconds, 90) FROM training_workout_exercises WHERE id = ?`, we.id).Scan(&restSec)
+		if restSec <= 0 {
+			restSec = 90
+		}
+		res, err := tx.Exec(`INSERT INTO training_routine_exercises (routine_id, exercise_id, position, default_sets, rest_seconds) VALUES (?, ?, ?, 3, ?)`, req.RoutineID, we.exID, we.pos, restSec)
 		if err != nil {
 			continue
 		}

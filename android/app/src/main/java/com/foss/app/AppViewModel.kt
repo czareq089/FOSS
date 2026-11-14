@@ -319,9 +319,9 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    suspend fun updateRoutineSets(routineExerciseId: Int, sets: List<RoutineSet>): Boolean {
+    suspend fun updateRoutineSets(routineExerciseId: Int, sets: List<RoutineSet>, restSeconds: Int? = null): Boolean {
         return try {
-            api.updateRoutineSets(UpdateRoutineSetsReq(routineExerciseId, sets)).isSuccessful
+            api.updateRoutineSets(UpdateRoutineSetsReq(routineExerciseId, sets, restSeconds)).isSuccessful
         } catch (e: Exception) {
             false
         }
@@ -457,9 +457,9 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    suspend fun createRoutine(name: String): Boolean {
+    suspend fun createRoutine(name: String, groupName: String? = null): Boolean {
         return try {
-            api.createRoutine(CreateRoutineReq(userId = currentUserId, name = name)).isSuccessful
+            api.createRoutine(CreateRoutineReq(userId = currentUserId, name = name, groupName = groupName)).isSuccessful
         } catch (e: Exception) {
             false
         }
@@ -473,9 +473,9 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    suspend fun updateRoutineName(routineId: Int, name: String): Boolean {
+    suspend fun updateRoutineDetails(routineId: Int, name: String? = null, groupName: String? = null, isArchived: Boolean? = null): Boolean {
         return try {
-            val response = api.updateRoutine(UpdateRoutineReq(routineId, name))
+            val response = api.updateRoutine(UpdateRoutineReq(routineId, name ?: "", groupName, isArchived))
             if (response.isSuccessful) {
                 loadRoutines()
                 loadRoutineAnalytics(routineId)
@@ -484,6 +484,18 @@ class AppViewModel : ViewModel() {
         } catch (e: Exception) {
             false
         }
+    }
+
+    suspend fun updateRoutineName(routineId: Int, name: String): Boolean {
+        return updateRoutineDetails(routineId, name = name)
+    }
+
+    suspend fun archiveRoutine(routineId: Int, isArchived: Boolean): Boolean {
+        return updateRoutineDetails(routineId, isArchived = isArchived)
+    }
+
+    suspend fun updateRoutineGroup(routineId: Int, groupName: String): Boolean {
+        return updateRoutineDetails(routineId, groupName = groupName)
     }
 
     suspend fun addExerciseToActiveWorkout(workoutId: Int, exerciseId: Int): Boolean {

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,6 +44,7 @@ import com.foss.app.models.ExerciseTrackingType
 import com.foss.app.models.ReorderPosition
 import com.foss.app.models.RoutineExercisePreview
 import com.foss.app.models.RoutineSet
+import com.foss.app.models.formatSecondsToTime
 import com.foss.app.models.getExerciseTrackingType
 import com.foss.app.ui.theme.AccentBlue
 import com.foss.app.ui.theme.setTypeDisplay
@@ -84,12 +86,16 @@ fun RoutineDetailScreen(
     var isStartingWorkout by remember { mutableStateOf(false) }
 
     var activeSetForType by remember { mutableStateOf<Pair<RoutineExercisePreview, Int>?>(null) }
+    var activeExerciseForTimer by remember { mutableStateOf<RoutineExercisePreview?>(null) }
 
-    val routineName = (viewModel.routinesState.value as? UiState.Success)
-        ?.data?.firstOrNull { it.id == routineId }?.name ?: "Routine"
+    val routine = (viewModel.routinesState.value as? UiState.Success)
+        ?.data?.firstOrNull { it.id == routineId }
+    val routineName = routine?.name ?: "Routine"
+    val routineGroup = routine?.groupName ?: ""
 
     var editMode by remember { mutableStateOf(startInEditMode) }
     var editedRoutineName by remember(routineName) { mutableStateOf(routineName) }
+    var editedGroupName by remember(routineGroup) { mutableStateOf(routineGroup) }
     val exercises = remember { mutableStateListOf<RoutineExercisePreview>() }
 
     LaunchedEffect(previewState) {
@@ -118,7 +124,16 @@ fun RoutineDetailScreen(
                             modifier = Modifier.fillMaxWidth().padding(end = 8.dp)
                         )
                     } else {
-                        Text(routineName)
+                        Column {
+                            Text(routineName, style = MaterialTheme.typography.titleMedium)
+                            if (routineGroup.isNotBlank()) {
+                                Text(
+                                    text = routineGroup,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                     }
                 },
                 navigationIcon = {
@@ -155,8 +170,9 @@ fun RoutineDetailScreen(
                                 if (editMode) {
                                     scope.launch {
                                         val trimmedName = editedRoutineName.trim()
-                                        if (trimmedName.isNotBlank() && trimmedName != routineName) {
-                                            viewModel.updateRoutineName(routineId, trimmedName)
+                                        val trimmedGroup = editedGroupName.trim()
+                                        if (trimmedName.isNotBlank() && (trimmedName != routineName || trimmedGroup != routineGroup)) {
+                                            viewModel.updateRoutineDetails(routineId, name = trimmedName, groupName = trimmedGroup)
                                         }
 
                                         val positions = exercises.mapIndexed { index, ex ->
@@ -171,7 +187,7 @@ fun RoutineDetailScreen(
                                             } else {
                                                 listOf(RoutineSet(1, "standard"))
                                             }
-                                            viewModel.updateRoutineSets(ex.routineExerciseId, safeSets)
+                                            viewModel.updateRoutineSets(ex.routineExerciseId, safeSets, ex.restSeconds)
                                         }
 
                                         viewModel.loadRoutineExercises(routineId)
@@ -181,6 +197,7 @@ fun RoutineDetailScreen(
                                     }
                                 } else {
                                     editedRoutineName = routineName
+                                    editedGroupName = routineGroup
                                     editMode = true
                                 }
                             },
@@ -241,8 +258,33 @@ fun RoutineDetailScreen(
                             routineId = routineId,
                             viewModel = viewModel,
                             exercises = exercises,
-                            onAddExerciseClick = onAddExerciseClick,
-                            onOpenSetType = { ex, index -> activeSetForType = Pair(ex, index) }
+                            editedGroupName = editedGroupName,
+                            onGroupNameChange = { editedGroupName = it },
+                            onAddExerciseClick = {
+                                scope.launch {
+                                    val trimmedName = editedRoutineName.trim()
+                                    val trimmedGroup = editedGroupName.trim()
+                                    if (trimmedName.isNotBlank() && (trimmedName != routineName || trimmedGroup != routineGroup)) {
+                                        viewModel.updateRoutineDetails(routineId, name = trimmedName, groupName = trimmedGroup)
+                                    }
+                                    val positions = exercises.mapIndexed { index, ex ->
+                                        ReorderPosition(exerciseId = ex.exerciseId, position = index + 1)
+                                    }
+                                    viewModel.reorderExercises(routineId, positions)
+                                    exercises.forEach { ex ->
+                                        val currentSets = ex.mutableTemplateSets.toList()
+                                        val safeSets = if (currentSets.isNotEmpty()) {
+                                            currentSets.mapIndexed { i, s -> RoutineSet(i + 1, s.setType) }
+                                        } else {
+                                            listOf(RoutineSet(1, "standard"))
+                                        }
+                                        viewModel.updateRoutineSets(ex.routineExerciseId, safeSets, ex.restSeconds)
+                                    }
+                                    onAddExerciseClick()
+                                }
+                            },
+                            onOpenSetType = { ex, index -> activeSetForType = Pair(ex, index) },
+                            onOpenTimer = { ex -> activeExerciseForTimer = ex }
                         )
                     } else {
                         LazyColumn(
@@ -297,6 +339,111 @@ fun RoutineDetailScreen(
                     SetTypeOption("failure", "Failure set", "F", Color(0xFFEF4444)) { updateType("failure") }
                     SetTypeOption("drop", "Drop set", "D", Color(0xFFA855F7)) { updateType("drop") }
                     SetTypeOption("back_off", "Back-off set", "B", Color(0xFF34D399)) { updateType("back_off") }
+                }
+            }
+        }
+
+        if (activeExerciseForTimer != null) {
+            val exercise = activeExerciseForTimer!!
+            var tempSeconds by remember(exercise.routineExerciseId) {
+                mutableIntStateOf(if (exercise.restSeconds > 0) exercise.restSeconds else 90)
+            }
+            var dragAccumulator by remember { mutableFloatStateOf(0f) }
+
+            ModalBottomSheet(
+                onDismissRequest = { activeExerciseForTimer = null },
+                sheetState = sheetState,
+                containerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Set Rest Timer (${exercise.name})",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(16.dp))
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth().pointerInput(Unit) {
+                            detectVerticalDragGestures(
+                                onVerticalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragAccumulator += dragAmount
+                                    if (dragAccumulator > 40f) {
+                                        if (tempSeconds >= 15) tempSeconds -= 15
+                                        dragAccumulator = 0f
+                                    } else if (dragAccumulator < -40f) {
+                                        tempSeconds += 15
+                                        dragAccumulator = 0f
+                                    }
+                                },
+                                onDragEnd = { dragAccumulator = 0f }
+                            )
+                        },
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (tempSeconds >= 15) formatSecondsToTime(tempSeconds - 15) else " ",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                                    if (tempSeconds >= 15) tempSeconds -= 15
+                                }
+                                .padding(vertical = 12.dp),
+                            textAlign = TextAlign.Center
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = formatSecondsToTime(tempSeconds),
+                                style = MaterialTheme.typography.displayMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            text = formatSecondsToTime(tempSeconds + 15),
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                                    tempSeconds += 15
+                                }
+                                .padding(vertical = 12.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+                    Button(
+                        onClick = {
+                            exercise.restSeconds = tempSeconds
+                            scope.launch {
+                                val currentSets = exercise.mutableTemplateSets.toList()
+                                val safeSets = if (currentSets.isNotEmpty()) {
+                                    currentSets.mapIndexed { i, s -> RoutineSet(i + 1, s.setType) }
+                                } else {
+                                    listOf(RoutineSet(1, "standard"))
+                                }
+                                viewModel.updateRoutineSets(exercise.routineExerciseId, safeSets, tempSeconds)
+                            }
+                            activeExerciseForTimer = null
+                        },
+                        modifier = Modifier.fillMaxWidth(0.8f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Save Timer")
+                    }
                 }
             }
         }
@@ -486,6 +633,24 @@ private fun ExercisePreviewCard(
                     }
                 }
             }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Timer,
+                    contentDescription = "Rest timer",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = "Rest: ${formatSecondsToTime(if (exercise.restSeconds > 0) exercise.restSeconds else 90)}",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
     }
 }
@@ -495,8 +660,11 @@ private fun ReorderableExerciseList(
     routineId: Int,
     viewModel: AppViewModel,
     exercises: androidx.compose.runtime.snapshots.SnapshotStateList<RoutineExercisePreview>,
+    editedGroupName: String,
+    onGroupNameChange: (String) -> Unit,
     onAddExerciseClick: () -> Unit,
-    onOpenSetType: (RoutineExercisePreview, Int) -> Unit
+    onOpenSetType: (RoutineExercisePreview, Int) -> Unit,
+    onOpenTimer: (RoutineExercisePreview) -> Unit
 ) {
     var draggedIndex by remember { mutableStateOf<Int?>(null) }
     var targetIndex by remember { mutableStateOf<Int?>(null) }
@@ -512,6 +680,21 @@ private fun ReorderableExerciseList(
         state = listState,
         modifier = Modifier.fillMaxSize().padding(16.dp)
     ) {
+        item {
+            OutlinedTextField(
+                value = editedGroupName,
+                onValueChange = onGroupNameChange,
+                singleLine = true,
+                label = { Text("Group / Folder (optional)") },
+                placeholder = { Text("e.g. Push Pull Legs") },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            )
+        }
         itemsIndexed(
             items = exercises,
             key = { _, exercise -> exercise.exerciseId }
@@ -646,6 +829,29 @@ private fun ReorderableExerciseList(
                             exit = shrinkVertically()
                         ) {
                             Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { onOpenTimer(exercise) }
+                                        .padding(vertical = 4.dp, horizontal = 2.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Timer,
+                                        contentDescription = "Rest timer",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = "Rest: ${formatSecondsToTime(if (exercise.restSeconds > 0) exercise.restSeconds else 90)}",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+
                                 Spacer(Modifier.height(8.dp))
 
                                 val trackingType = getExerciseTrackingType(exercise.type)
